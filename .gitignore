@@ -1,0 +1,24 @@
+# Secrets - never commit these
+.env
+
+# Local database (created on first run)
+*.db
+*.sqlite
+*.sqlite3
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+
+# Local handoff artifacts (zip/bundle prepared for sending to a collaborator)
+handoff/
