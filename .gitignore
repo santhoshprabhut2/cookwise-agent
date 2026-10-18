@@ -1,5 +1,6 @@
 # Secrets - never commit these
 .env
+.streamlit/secrets.toml
 
 # Local database (created on first run)
 *.db

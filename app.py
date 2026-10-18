@@ -17,6 +17,15 @@ import streamlit as st
 
 st.set_page_config(page_title="Smart Cooking Assistant", page_icon="🍳", layout="wide")
 
+# Deployments (e.g. Streamlit Community Cloud) hand the OpenAI key over via
+# st.secrets instead of a local .env file, so surface every secret as an
+# environment variable too. A missing secrets file is not an error locally.
+try:
+    for _key, _value in st.secrets.items():
+        os.environ.setdefault(str(_key), str(_value))
+except FileNotFoundError:
+    pass
+
 import main  # noqa: E402
 import tools  # noqa: E402
 

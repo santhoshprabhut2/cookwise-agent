@@ -232,6 +232,7 @@ asking for 1 tomato, and `Dahi` is treated as `curd`, via a small synonym map.
 | Feedback loop | `provide_feedback` writes, `suggest_recipe` reads the average |
 | Testing | `test_tools.py`, 44 tests, runs without an API key |
 | Documentation | this file |
+| Deployment | `app.py` secret merging, `.streamlit/`, section 11 |
 
 ## 10. The repository
 
@@ -247,36 +248,29 @@ python test_tools.py     # verifies the whole tool layer, no API key needed
 streamlit run app.py     # the reader supplies their own key in .env
 ```
 
-### Adding code to it
+## 11. Deployment
 
-The repository belongs to someone else's account, so whoever pushes authenticates as
-themselves against that repository. There are two ways to be given write access, and neither
-one requires anybody to share a password or a token:
+The web UI ships cloud-ready. It is deployed on **Streamlit Community Cloud**:
 
-1. **Collaborator invite.** The owner opens **Settings → Collaborators → Add people** and
-   invites the account that will push. That account accepts, then:
+1. Fork or use this repository.
+2. Sign in at [share.streamlit.io](https://share.streamlit.io) (GitHub or Google).
+3. **Create app → Deploy a public app from GitHub**, pick this repo, branch `main`, main
+   file `app.py`, and let Streamlit pick the Python version.
+4. Before or after deploying, open **App settings → Secrets** and paste:
 
-   ```bash
-   git remote add origin https://github.com/santhoshprabhut2/cookwise-agent.git
-   git push -u origin main
+   ```toml
+   OPENAI_API_KEY = "sk-..."
    ```
 
-   If Git asks for a password, GitHub expects a Personal Access Token there rather than an
-   account password, created under Settings → Developer settings → Personal access tokens.
+   There is a ready-made template in `.streamlit/secrets.example.toml`.
 
-2. **Deploy key**, when the owner would rather not add a collaborator. Generate an SSH
-   keypair, send the owner only the **public** half, and they add it under
-   **Settings → Deploy keys** with *Allow write access* ticked. The key then pushes to that
-   one repository and nothing else, and it is revocable in a single click. Point the remote
-   at SSH and push:
+Notes for a deployed instance:
 
-   ```bash
-   git remote set-url origin git@github.com:santhoshprabhut2/cookwise-agent.git
-   git push -u origin main
-   ```
-
-The owner can also upload the files directly through the GitHub web interface, which needs no
-Git and no credentials from anyone else.
-
-`.gitignore` excludes `.env` and `*.db`, so no API key and no local database are ever
-committed. Confirm with `git status --short` before pushing that neither is staged.
+- `app.py` merges `st.secrets` into the process environment at startup, so the same
+  key-loading path works locally (`.env`) and in the cloud (`secrets`).
+- The SQLite database is recreated and the 14 recipes re-seeded on every fresh container
+  start (`tools.init_db(seed=True)` runs at boot), so no migration step is needed. Anything
+  added while the app runs is stored in SQLite and lasts until the container restarts; the
+  `.gitignore`/`reset` button in the sidebar work exactly the same as locally.
+- The API key never touches the repository: locally it lives in `.env`, in the cloud in the
+  encrypted Streamlit secrets store.
