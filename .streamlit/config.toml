@@ -1,0 +1,4 @@
+# Streamlit theme overrides. Safe to change or delete.
+[theme]
+base = "light"
+primaryColor = "#e07a1f"
