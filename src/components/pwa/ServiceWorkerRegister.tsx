@@ -20,8 +20,21 @@ import { BASE_PATH, STATIC_EXPORT, withBasePath } from "@/lib/base-path";
  */
 export function ServiceWorkerRegister() {
   useEffect(() => {
-    if (process.env.NODE_ENV !== "production") return;
     if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
+
+    if (process.env.NODE_ENV !== "production") {
+      // A worker left behind by a production preview on this address keeps
+      // serving old pages, or the offline page, to the dev server. Remove it.
+      void navigator.serviceWorker
+        .getRegistrations()
+        .then((regs) => regs.forEach((reg) => void reg.unregister()));
+      if ("caches" in window) {
+        void caches
+          .keys()
+          .then((keys) => keys.filter((k) => k.startsWith("cookwise-")).forEach((k) => void caches.delete(k)));
+      }
+      return;
+    }
 
     let registration: ServiceWorkerRegistration | undefined;
     let cancelled = false;
