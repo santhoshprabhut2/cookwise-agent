@@ -45,3 +45,32 @@ next-env.d.ts
 
 # GitHub Pages build: the working copy and its output
 /.pages/
+
+# --- Smart Cooking Assistant (Python / Streamlit) ---
+# Secrets - never commit these
+.env
+.streamlit/secrets.toml
+
+# Local database (created on first run)
+*.db
+*.sqlite
+*.sqlite3
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# OS / editors
+.idea/
+.vscode/
+
+# Local handoff artifacts (zip/bundle prepared for sending to a collaborator)
+handoff/
+
+# Keep the committed example files even though .env* is ignored above
+!.env.example
