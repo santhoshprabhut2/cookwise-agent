@@ -1,7 +1,8 @@
 # Cookwise — Seed Data (ingredients & recipes)
 
-Catalog owned by `src/lib/data/seed/ingredients.ts` (75 ingredients) and
-`src/lib/data/seed/recipes.ts` (32 recipes). Both are plain data modules that match
+Catalog owned by `src/lib/data/seed/ingredients.ts` (77 ingredients) and
+`src/lib/data/seed/recipes.ts` (41 core recipes plus 21 complete meals built from them, 62 in
+all). Both are plain data modules that match
 `src/lib/types.ts` exactly; `src/lib/data/seed/__tests__/seed.test.ts` guards every rule below.
 Run `npx vitest run src/lib/data/seed`.
 
@@ -51,12 +52,12 @@ advice that the retention screen echoes.
 
 ---
 
-## Ingredient ids (75)
+## Ingredient ids (77)
 
-- **vegetables (22)** — `tomato`, `onion`, `spinach`, `green-chilli`, `potato`, `carrot`,
+- **vegetables (24)** — `tomato`, `onion`, `spinach`, `green-chilli`, `potato`, `carrot`,
   `capsicum`, `garlic`, `ginger`, `coriander-leaves`, `curry-leaves`, `peas`, `beans`, `cabbage`,
   `cauliflower`, `brinjal`, `drumstick`, `mint-leaves`, `cucumber`, `beetroot`, `spring-onion`,
-  `sweet-corn`
+  `sweet-corn`, `broccoli`, `sweet-potato`
 - **fruits (2)** — `banana`, `lemon`
 - **proteins (6)** — `egg`, `chicken`, `fish`, `prawns`, `soya-chunks`, `tofu`
 - **legumes (7)** — `urad-dal`, `toor-dal`, `moong-dal`, `chana-dal`, `chickpeas`, `rajma`,
@@ -78,7 +79,7 @@ Everything else is `g`. Each entry carries Tamil/Hindi `aliases` ("thakkali", "v
 "keerai", "pyaaz", "paal", "arisi", …) so the ingredient search and the Gemini identify/receipt
 matchers can hit them.
 
-## Recipe ids (32)
+## Core recipe ids (41)
 
 | id | name | meals | min | serves | method | kcal/serving | ₹/serving |
 |---|---|---|---|---|---|---|---|
@@ -114,12 +115,78 @@ matchers can hit them.
 | `banana-oat-smoothie` | Banana Oat Smoothie | snack, breakfast | 5 | 2 | raw | 324 | 30 |
 | `sprouts-salad` | Sprouts Salad | snack | 10 | 2 | raw | 132 | 21 |
 | `vegetable-soup` | Vegetable Soup | dinner, snack | 25 | 2 | boil | 155 | 18 |
+| `steamed-broccoli` | Steamed Broccoli with Lemon & Pepper | lunch, dinner, snack | 9 | 2 | steam | 79 | 32 |
+| `steamed-carrot-beans` | Steamed Carrot & Beans | lunch, dinner, snack | 10 | 2 | steam | 82 | 16 |
+| `steamed-veg-egg-plate` | Steamed Veg & Boiled Egg Plate | lunch, dinner | 15 | 2 | steam | 230 | 40 |
+| `banana-curd-bowl` | Banana Curd Bowl | breakfast, snack | 4 | 2 | raw | 284 | 32 |
+| `steamed-sweet-potato` | Steamed Sweet Potato Chaat | breakfast, lunch, snack | 22 | 2 | steam | 235 | 20 |
+| `steamed-corn-chaat` | Steamed Corn Chaat | lunch, dinner, snack | 14 | 2 | steam | 150 | 22 |
+| `egg-veg-sandwich` | Egg & Veg Sandwich | breakfast, lunch, dinner | 10 | 2 | shallow_fry | 358 | 31 |
+| `steamed-rice` | Steamed Rice | lunch, dinner | 28 | 2 | simmer | 345 | 8 |
+| `chapati` | Chapati | lunch, dinner | 29 | 2 | roast | 347 | 6 |
 
-**Coverage** — `primaryMethod` spread: simmer 9, saute 8, pressure_cook 5, shallow_fry 2,
-stir_fry 2, boil 2, raw 2, steam 1, grill 1 (the retention model keys off this field).
-12 vegan recipes, 11 dairy-vegetarian, 3 egg, 2 seafood, 4 chicken;
-7 recipes carry a `snack` meal type; 6 finish in ≤ 15 minutes; spice levels span 1–4;
-cost per serving spans ₹7–₹103.
+The last two are **staples** (tag `staple`). They exist to be eaten with a main dish and are never
+planned or recommended on their own; see Complete meals below.
+
+The last seven are the **simple dishes**: every one is `easy`, has six ingredients or fewer
+besides seasoning, and finishes in 22 minutes or less (the steamed ones need one pot and a
+lid). They give the planner something to offer a slot that only allows 10 or 20 minutes.
+Steaming also keeps more vitamin C than boiling, which is what the retention engine models.
+
+**Cook-once dishes** — nine long, reheat-friendly recipes carry the `batch_friendly` tag
+(`rajma-masala`, `chana-masala`, `dal-tadka`, `chicken-curry`, `chicken-biryani`,
+`soya-chunk-curry`, `palak-paneer`, `vegetable-pulao`, `aloo-gobi`). The planner may cook one of
+these once and serve it at the next lunch or dinner as a leftover; see ENGINES.md. Fish and
+prawns are deliberately left untagged because they are best eaten the day they are cooked.
+
+## Complete meals (21 built, 30 for lunch and dinner)
+
+A curry is a dish, not a lunch. `src/lib/data/seed/meals.ts` lists 21 pairings of a main dish
+with the rice or chapati it is eaten with (and, for the two thalis, a vegetable side).
+`buildCompleteMeals` runs `composeMeal` over them when the catalog loads, so each meal is exactly
+its parts: ingredients merged, nutrition and cost summed, steps joined, and a change to the dal
+recipe flows into every plate with dal on it. Each is tagged `complete_meal` and takes lunch and
+dinner unless noted.
+
+| id | name | main + with |
+|---|---|---|
+| `rajma-chawal` | Rajma Chawal | Rajma Masala + Steamed Rice |
+| `dal-rice` | Dal Tadka with Rice | Dal Tadka + Steamed Rice |
+| `chana-masala-rice` | Chana Masala with Rice | Chana Masala + Steamed Rice |
+| `soya-curry-rice` | Soya Chunk Curry with Rice | Soya Chunk Curry + Steamed Rice |
+| `chicken-curry-rice` | Chicken Curry with Rice | Chicken Curry + Steamed Rice |
+| `fish-curry-rice` | Fish Curry with Rice | Fish Curry + Steamed Rice |
+| `egg-curry-rice` | Tomato Egg Curry with Rice | Tomato Egg Curry + Steamed Rice |
+| `prawn-masala-rice` | Prawn Masala with Rice | Prawn Masala + Steamed Rice |
+| `tofu-stir-fry-rice` | Tofu Stir Fry with Rice | Tofu Stir Fry + Steamed Rice |
+| `spinach-chicken-rice` | Spinach Chicken Stir Fry with Rice | Spinach Chicken Stir Fry + Steamed Rice |
+| `egg-veg-plate-rice` | Steamed Veg and Egg Plate with Rice | Steamed Veg & Boiled Egg Plate + Steamed Rice |
+| `chana-masala-chapati` | Chana Masala with Chapati | Chana Masala + Chapati |
+| `soya-curry-chapati` | Soya Chunk Curry with Chapati | Soya Chunk Curry + Chapati |
+| `chicken-curry-chapati` | Chicken Curry with Chapati | Chicken Curry + Chapati |
+| `egg-curry-chapati` | Tomato Egg Curry with Chapati | Tomato Egg Curry + Chapati |
+| `palak-paneer-chapati` | Palak Paneer with Chapati | Palak Paneer + Chapati |
+| `aloo-gobi-chapati` | Aloo Gobi with Chapati | Aloo Gobi + Chapati |
+| `egg-bhurji-chapati` | Egg Bhurji with Chapati (breakfast, dinner) | Egg Bhurji + Chapati |
+| `paneer-bhurji-chapati` | Paneer Bhurji with Chapati (breakfast, dinner) | Paneer Bhurji + Chapati |
+| `dal-chapati-thali` | Dal Chapati Thali with Cabbage Poriyal | Dal Tadka + Chapati + Cabbage Poriyal |
+| `dal-rice-sabzi-thali` | Dal Rice Thali with Aloo Gobi | Dal Tadka + Steamed Rice + Aloo Gobi |
+
+**Already whole plates** — nine core recipes carry the carb in the dish itself (50 g or more per
+serving) and count as complete without a pairing: Chicken Biryani, Vegetable Pulao, Curd Rice,
+Lemon Rice, Rasam Rice, Moong Dal Khichdi, Idli Sambar, Tomato Pasta and Egg & Veg Sandwich.
+With the 21 above that makes **30 plates for lunch and dinner**. The Complete meals screen
+(`/meals`) lists them with filters.
+
+**Rules** — `isCompleteMeal` is true for the tag or for 50 g of carbs a serving; `isStaple` meals
+are never complete on their own. A plate gets rice first (it simmers unattended, so it adds no
+time) and chapati last (it needs hands and a hot tawa, so its time is added). Chapati plates
+therefore take 25 to 30 minutes longer than the same curry with rice.
+
+**Coverage** (the 41 core recipes) — `primaryMethod` spread: simmer 10, saute 8, steam 6,
+pressure_cook 5, shallow_fry 3, raw 3, stir_fry 2, boil 2, grill 1, roast 1 (the retention model
+keys off this field). 18 vegan recipes; 12 carry a `snack` meal type; 12 finish in ≤ 15 minutes
+and 8 in ≤ 10; spice levels span 1–4; cost per serving spans ₹6–₹103.
 
 **Diet convention** — `diets` lists every diet the recipe is *compatible with*, widest first:
 vegan dishes list all five, dairy-vegetarian dishes list all but `vegan`, egg dishes list

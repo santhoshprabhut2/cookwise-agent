@@ -43,6 +43,12 @@ export interface CookState {
   setRetention(est: RetentionEstimate): void;
   /** Completes, computes retention, deducts pantry once, marks the meal cooked. */
   complete(): CookSession | undefined;
+  /**
+   * Log a reheated leftover as eaten. Nothing is cooked or deducted, because the
+   * dish was already cooked (and the pantry already charged) for its source
+   * meal. The portion still counts towards that day's intake.
+   */
+  logLeftover(mealId: ID): CookSession | undefined;
   abandon(): void;
   reset(): void;
 }
@@ -255,8 +261,27 @@ export const useCookStore = create<CookState>()(
             }
           }
 
+          // A dish cooked for several meals is cooked (and deducted) once for
+          // all of them, but only the cook's own portion is eaten now. Record
+          // that portion so the day's intake is right; each leftover is logged
+          // when it is eaten, by `logLeftover`.
+          let eatenServings = session.servings;
+          if (session.plannedMealId) {
+            const plans = usePlanStore.getState();
+            const meal = plans.mealById(session.plannedMealId);
+            const hasLeftovers =
+              meal !== undefined &&
+              (plans.planForMeal(meal.id)?.meals ?? []).some(
+                (m) => m.leftoverOf === meal.id,
+              );
+            if (meal && hasLeftovers) {
+              eatenServings = Math.min(session.servings, meal.servings);
+            }
+          }
+
           const completed: CookSession = {
             ...session,
+            servings: eatenServings,
             status: "completed",
             completedAt,
             retention,
@@ -270,6 +295,31 @@ export const useCookStore = create<CookState>()(
             activeId: null,
           });
           return completed;
+        },
+
+        logLeftover(mealId) {
+          const plans = usePlanStore.getState();
+          const meal = plans.mealById(mealId);
+          if (!meal || !meal.leftoverOf || meal.status !== "planned") return undefined;
+
+          const now = nowIso();
+          const session: CookSession = {
+            id: uid(),
+            userId: useProfileStore.getState().userId(),
+            recipeId: meal.recipeId,
+            plannedMealId: meal.id,
+            servings: meal.servings,
+            status: "completed",
+            startedAt: now,
+            completedAt: now,
+            ingredientLogs: [],
+            stepLogs: [],
+            temperatureHistory: [],
+            pantryDeducted: true,
+          };
+          set({ sessions: [...get().sessions, session].slice(-MAX_SESSIONS) });
+          plans.setStatus(meal.id, "cooked");
+          return session;
         },
 
         abandon() {

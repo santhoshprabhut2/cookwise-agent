@@ -24,7 +24,7 @@ import {
 } from "@/components/ui";
 import { aiAvailable } from "@/lib/ai/client";
 import { INGREDIENTS } from "@/lib/data/seed/ingredients";
-import { todaysMeals } from "@/lib/data/selectors";
+import { cookServingsFor, leftoversOf, todaysMeals } from "@/lib/data/selectors";
 import { useHydrated } from "@/lib/data/storage";
 import {
   usePantryStore,
@@ -38,6 +38,14 @@ import type { ISODate, MealType, PlannedMeal } from "@/lib/types";
 import { addDays, parseISODate, toISODate, weekStartOf } from "@/lib/utils";
 
 const MEAL_SLOTS: MealType[] = ["breakfast", "lunch", "dinner", "snack"];
+
+const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+/** "lunch" for a meal on the same day as `from`, otherwise "Tue dinner". */
+function slotName(meal: PlannedMeal, from: ISODate): string {
+  if (meal.date === from) return meal.mealType;
+  return `${WEEKDAY_SHORT[parseISODate(meal.date).getDay()]} ${meal.mealType}`;
+}
 
 function dayIndexIn(weekStart: ISODate, date: ISODate): number {
   const diff = Math.round(
@@ -298,24 +306,35 @@ export default function WeeklyPlanPage() {
               </Card>
             ) : (
               <div className="flex flex-col gap-3">
-                {meals.map((meal) => (
-                  <MealCard
-                    key={meal.id}
-                    meal={meal}
-                    recipe={recipeById.get(meal.recipeId)}
-                    reason={reasons.get(meal.id)}
-                    onToggleLock={() => {
-                      usePlanStore.getState().lockMeal(meal.id, !meal.locked);
-                      toast({
-                        title: meal.locked ? "Meal unlocked" : "Meal locked",
-                        description: meal.locked
-                          ? undefined
-                          : "It will survive a regenerate.",
-                      });
-                    }}
-                    onOpenActions={() => openActions(meal.id)}
-                  />
-                ))}
+                {meals.map((meal) => {
+                  const source = meal.leftoverOf
+                    ? plan.meals.find((m) => m.id === meal.leftoverOf)
+                    : undefined;
+                  const feeds = leftoversOf(plan, meal.id);
+                  return (
+                    <MealCard
+                      key={meal.id}
+                      meal={meal}
+                      recipe={recipeById.get(meal.recipeId)}
+                      reason={reasons.get(meal.id)}
+                      leftoverFrom={source ? slotName(source, meal.date) : undefined}
+                      alsoFeeds={
+                        feeds.length > 0 ? feeds.map((m) => slotName(m, meal.date)) : undefined
+                      }
+                      cookServings={feeds.length > 0 ? cookServingsFor(plan, meal) : undefined}
+                      onToggleLock={() => {
+                        usePlanStore.getState().lockMeal(meal.id, !meal.locked);
+                        toast({
+                          title: meal.locked ? "Meal unlocked" : "Meal locked",
+                          description: meal.locked
+                            ? undefined
+                            : "It will survive a regenerate.",
+                        });
+                      }}
+                      onOpenActions={() => openActions(meal.id)}
+                    />
+                  );
+                })}
               </div>
             )}
 

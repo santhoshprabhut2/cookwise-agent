@@ -93,6 +93,9 @@ export const RECIPE_TAGS = [
   "one_pot",
   "kid_friendly",
   "guest_friendly",
+  "batch_friendly",
+  "complete_meal",
+  "staple",
 ] as const;
 export const PANTRY_SOURCES = [
   "manual",
@@ -288,6 +291,16 @@ export const profileSchema = z.object({
   currency: z.literal("INR").default("INR"),
   skill: z.enum(SKILLS),
   timeAvailability: z.enum(TIME_AVAILABILITY),
+  // Zod 4 record() over an enum key is exhaustive; partialRecord() allows gaps.
+  timeSchedule: z
+    .partialRecord(
+      z.enum(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]),
+      z.partialRecord(
+        z.enum(["breakfast", "lunch", "dinner"]),
+        z.enum(["very_little", "little", "some", "plenty"]),
+      ),
+    )
+    .optional(),
   priorities: z.array(z.enum(PRIORITIES)).default([]),
   servingsDefault: z.number().int().positive().default(2),
   onboardingComplete: z.boolean().default(true),
@@ -330,6 +343,7 @@ export const plannedMealSchema = z.object({
   locked: z.boolean().default(false),
   status: z.enum(PLANNED_MEAL_STATUSES).default("planned"),
   note: z.string().optional(),
+  leftoverOf: z.string().optional(),
 });
 
 export const scheduleChangeSchema = z.object({

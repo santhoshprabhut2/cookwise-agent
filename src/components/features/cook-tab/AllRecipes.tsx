@@ -1,5 +1,6 @@
 "use client";
 
+import { routes } from "@/lib/routes";
 import { useMemo, useState } from "react";
 import { Chip, EmojiTile, EmptyState, ListRow, SearchInput } from "@/components/ui";
 import { useRecipeStore, type RecipeFilters } from "@/lib/data/stores";
@@ -9,6 +10,8 @@ const QUICK_MAX_MIN = 20;
 
 type FilterKey =
   | "all"
+  | "complete"
+  | "mine"
   | "breakfast"
   | "lunch"
   | "dinner"
@@ -19,6 +22,8 @@ type FilterKey =
 
 const FILTERS: { key: FilterKey; label: string; filters: RecipeFilters }[] = [
   { key: "all", label: "All", filters: {} },
+  { key: "complete", label: "Complete meals", filters: { complete: true } },
+  { key: "mine", label: "My foods", filters: { custom: true } },
   { key: "breakfast", label: "Breakfast", filters: { mealType: "breakfast" } },
   { key: "lunch", label: "Lunch", filters: { mealType: "lunch" } },
   { key: "dinner", label: "Dinner", filters: { mealType: "dinner" } },
@@ -83,7 +88,7 @@ export function AllRecipes({ renderHeader }: AllRecipesProps) {
             <ListRow
               key={r.id}
               divider
-              href={`/recipes/${r.id}`}
+              href={routes.recipe(r.id)}
               leading={
                 <EmojiTile emoji={r.emoji} imageUrl={r.imageUrl} alt={r.name} size={40} />
               }

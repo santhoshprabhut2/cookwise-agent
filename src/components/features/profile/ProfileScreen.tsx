@@ -38,12 +38,23 @@ import {
 import { goalLabel, profileSubtitle } from "@/lib/data/selectors";
 import { useHydrated } from "@/lib/data/storage";
 import { useProfileStore } from "@/lib/data/stores";
+import { hasSchedule, rushedMealCount } from "@/lib/engines/schedule";
+import type { UserProfile } from "@/lib/types";
 import { formatINR, humanize } from "@/lib/utils";
 import { LearningCard } from "./LearningCard";
 import { ProfileDetailRow } from "./ProfileDetailRow";
 import { ProfileSettingsSheet } from "./ProfileSettingsSheet";
 
 /** `/profile` — the read-only summary of everything onboarding collected. */
+/** "Medium" or, with a weekly grid, "Custom week · 4 rushed meals". */
+function timeSummary(profile: UserProfile): string {
+  if (!hasSchedule(profile.timeSchedule)) {
+    return labelOf(TIME_OPTIONS, profile.timeAvailability);
+  }
+  const rushed = rushedMealCount(profile.timeSchedule, profile.timeAvailability);
+  return `Custom week · ${rushed} rushed meal${rushed === 1 ? "" : "s"}`;
+}
+
 export function ProfileScreen() {
   const hydrated = useHydrated();
   const profile = useProfileStore((s) => s.profile);
@@ -136,7 +147,7 @@ export function ProfileScreen() {
                 divider
                 icon={<Clock size={18} />}
                 label="Time Available"
-                value={labelOf(TIME_OPTIONS, profile.timeAvailability)}
+                value={timeSummary(profile)}
               />
               <ProfileDetailRow
                 divider

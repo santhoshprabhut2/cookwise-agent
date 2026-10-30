@@ -4,7 +4,7 @@
  * Pure data — this module must never import a store (the stores import it).
  */
 
-import type { PantrySource, Unit, UserProfile } from "@/lib/types";
+import type { PantrySource, TimeSchedule, Unit, UserProfile } from "@/lib/types";
 import { nowIso } from "@/lib/utils";
 
 /** Local-only user id used until a Supabase auth user signs in. */
@@ -41,6 +41,21 @@ export function createEmptyProfile(id: string = DEMO_USER_ID): UserProfile {
     updatedAt: ts,
   };
 }
+
+/**
+ * Santhosh's week, as he described it: how long he has to cook each meal.
+ * "Less / little time" is about 20 minutes, "very little" about 10, "some time"
+ * about 30, and "have time" is unlimited.
+ */
+export const DEMO_TIME_SCHEDULE: TimeSchedule = {
+  mon: { breakfast: "little", lunch: "plenty", dinner: "plenty" },
+  tue: { breakfast: "plenty", lunch: "plenty", dinner: "plenty" },
+  wed: { breakfast: "little", lunch: "very_little", dinner: "plenty" },
+  thu: { breakfast: "very_little", lunch: "plenty", dinner: "plenty" },
+  fri: { breakfast: "plenty", lunch: "some", dinner: "plenty" },
+  sat: { breakfast: "plenty", lunch: "plenty", dinner: "plenty" },
+  sun: { breakfast: "plenty", lunch: "plenty", dinner: "plenty" },
+};
 
 /**
  * Santhosh — the persona in the reference mockups.
@@ -80,6 +95,7 @@ export function createDemoProfile(id: string = DEMO_USER_ID): UserProfile {
 
     skill: "beginner",
     timeAvailability: "varies",
+    timeSchedule: DEMO_TIME_SCHEDULE,
     priorities: ["nutrition", "budget", "time", "taste", "waste_reduction"],
     servingsDefault: 2,
 
@@ -116,5 +132,5 @@ export const DEMO_PANTRY: DemoPantryRow[] = [
 export const DEMO_TODAY_MEALS = {
   breakfast: "ragi-dosa",
   lunch: "chicken-biryani",
-  dinner: "egg-bhurji",
+  dinner: "egg-bhurji-chapati",
 } as const;

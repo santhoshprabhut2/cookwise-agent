@@ -7,6 +7,9 @@
  */
 
 import { beforeAll, describe, expect, it, vi } from "vitest";
+import { daysBetween } from "@/lib/engines/helpers";
+import { slotTimeLimit, totalMinutes } from "@/lib/engines/planner";
+import type { MealType } from "@/lib/types";
 import { toISODate, weekStartOf } from "@/lib/utils";
 
 vi.stubGlobal("window", globalThis);
@@ -20,7 +23,7 @@ const { useProfileStore } = await import("../stores/profile");
 const { useRecipeStore } = await import("../stores/recipes");
 const { isAppHydrated } = await import("../storage");
 const { nextMealToday, todaysMeals } = await import("../selectors");
-const { DEMO_PANTRY } = await import("../seed/demoUser");
+const { DEMO_PANTRY, DEMO_TODAY_MEALS } = await import("../seed/demoUser");
 
 const TODAY = toISODate();
 
@@ -59,20 +62,30 @@ describe("ensureSeeded", () => {
     expect(expiring.length).toBeGreaterThanOrEqual(3);
   });
 
-  it("plans the current week with the mockup meals for today", () => {
+  it("plans the current week with the mockup meals for today, where they fit the schedule", () => {
     const plan = usePlanStore.getState().currentPlan(weekStartOf(TODAY));
     expect(plan).toBeDefined();
 
+    const profile = useProfileStore.getState().profile!;
     const meals = todaysMeals(plan, TODAY);
     const byType = Object.fromEntries(meals.map((m) => [m.mealType, m]));
-    expect(byType.breakfast?.recipeId).toBe("ragi-dosa");
-    expect(byType.lunch?.recipeId).toBe("chicken-biryani");
-    expect(byType.dinner?.recipeId).toBe("egg-bhurji");
+    const dayIndex = daysBetween(weekStartOf(TODAY), TODAY);
+
+    // A mockup dish is forced only where today's schedule leaves time to cook it.
+    for (const [mealType, recipeId] of Object.entries(DEMO_TODAY_MEALS)) {
+      const recipe = useRecipeStore.getState().byId(recipeId)!;
+      const slot = { date: TODAY, mealType: mealType as MealType, dayIndex };
+      if (totalMinutes(recipe) <= slotTimeLimit(profile, slot)) {
+        expect(byType[mealType]?.recipeId, mealType).toBe(recipeId);
+      }
+    }
+    // Dinner is free every day, so Home always has Egg Bhurji to offer next.
+    expect(byType.dinner?.recipeId).toBe("egg-bhurji-chapati");
 
     // Breakfast + lunch are already cooked, so Home surfaces Egg Bhurji.
     expect(byType.breakfast?.status).toBe("cooked");
     expect(byType.lunch?.status).toBe("cooked");
-    expect(nextMealToday(plan, TODAY)?.recipeId).toBe("egg-bhurji");
+    expect(nextMealToday(plan, TODAY)?.recipeId).toBe("egg-bhurji-chapati");
   });
 
   it("records completed sessions for the cooked meals without touching the pantry", () => {

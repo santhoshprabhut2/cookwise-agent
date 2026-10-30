@@ -16,18 +16,26 @@ interface Tab {
   href: string;
   label: string;
   icon: LucideIcon;
+  /** Other routes that belong to this tab, so it stays highlighted on them. */
+  alsoActiveFor?: readonly string[];
 }
 
 export const NAV_TABS: Tab[] = [
   { href: "/home", label: "Home", icon: Home },
   { href: "/plan", label: "Plan", icon: CalendarDays },
-  { href: "/cook", label: "Cook", icon: ChefHat },
+  { href: "/cook", label: "Cook", icon: ChefHat, alsoActiveFor: ["/meals", "/foods"] },
   { href: "/pantry", label: "Pantry", icon: ShoppingBasket },
   { href: "/profile", label: "Profile", icon: User },
 ];
 
-export function isTabActive(pathname: string, href: string): boolean {
-  return pathname === href || pathname.startsWith(`${href}/`);
+export function isTabActive(
+  pathname: string,
+  href: string,
+  alsoActiveFor: readonly string[] = [],
+): boolean {
+  return [href, ...alsoActiveFor].some(
+    (root) => pathname === root || pathname.startsWith(`${root}/`),
+  );
 }
 
 /** Fixed 5-tab bar shown on every route inside the `(tabs)` group. */
@@ -44,8 +52,8 @@ export function BottomNav({ className }: { className?: string }) {
       )}
     >
       <ul className="grid h-[var(--nav-height)] grid-cols-5">
-        {NAV_TABS.map(({ href, label, icon: Icon }) => {
-          const active = isTabActive(pathname, href);
+        {NAV_TABS.map(({ href, label, icon: Icon, alsoActiveFor }) => {
+          const active = isTabActive(pathname, href, alsoActiveFor);
           return (
             <li key={href} className="flex">
               <Link

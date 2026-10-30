@@ -1,12 +1,14 @@
 "use client";
 
+import { routes } from "@/lib/routes";
 import { ChevronRight, Info } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useMemo, useState } from "react";
 import { AllRecipes, RecommendedGrid, TodayCooking } from "@/components/features/cook-tab";
+import { filterPlates } from "@/components/features/foods";
 import { AppHeader, Page } from "@/components/layout";
 import { Card, EmptyState, SectionHeader, Skeleton, useToast } from "@/components/ui";
-import { expiringSummary, todaysMeals } from "@/lib/data/selectors";
+import { cookServingsFor, expiringSummary, todaysMeals } from "@/lib/data/selectors";
 import { useHydrated } from "@/lib/data/storage";
 import {
   useCookStore,
@@ -43,6 +45,8 @@ export default function CookTabPage() {
   );
 
   const expiring = useMemo(() => expiringSummary(pantry), [pantry]);
+  const plateCount = useMemo(() => filterPlates(recipes, "all").length, [recipes]);
+  const myFoodCount = useMemo(() => recipes.filter((r) => !r.isPublic).length, [recipes]);
 
   const recommended = useMemo(
     () => (profile ? recommend(recipes, preferences, profile, RECOMMENDED_COUNT) : []),
@@ -53,16 +57,33 @@ export default function CookTabPage() {
     (meal: PlannedMeal, recipe: Recipe) => {
       setStarting(true);
       try {
+        // A dish that also feeds leftovers is cooked once for every portion.
         const session = useCookStore
           .getState()
-          .start(recipe.id, meal.servings, meal.id);
-        router.push(`/cook/${session.id}`);
+          .start(recipe.id, cookServingsFor(plan, meal), meal.id);
+        router.push(routes.cook(session.id));
       } catch {
         toast({ title: "Could not start the session", tone: "error" });
         setStarting(false);
       }
     },
-    [router, toast],
+    [router, toast, plan],
+  );
+
+  const reheat = useCallback(
+    (meal: PlannedMeal) => {
+      const logged = useCookStore.getState().logLeftover(meal.id);
+      toast(
+        logged
+          ? {
+              title: "Leftover logged",
+              description: "Counted in today's intake. The pantry is untouched.",
+              tone: "success",
+            }
+          : { title: "Could not log that meal", tone: "error" },
+      );
+    },
+    [toast],
   );
 
   return (
@@ -94,6 +115,8 @@ export default function CookTabPage() {
                   recipeById={recipeById}
                   onStart={startCooking}
                   starting={starting}
+                  onReheat={reheat}
+                  cookServings={(meal) => cookServingsFor(plan, meal)}
                 />
               ) : (
                 <EmptyState
@@ -104,6 +127,29 @@ export default function CookTabPage() {
                   actionHref="/plan"
                 />
               )}
+            </section>
+
+            <section className="mt-4 grid grid-cols-2 gap-3" aria-label="Meals and your foods">
+              <Card href="/meals" padding="sm" tone="green">
+                <span aria-hidden="true" className="text-2xl">
+                  🍛
+                </span>
+                <span className="mt-1 block text-[14px] font-semibold text-text">
+                  Complete meals
+                </span>
+                <span className="block text-xs text-text-2">
+                  {plateCount} with rice or chapati
+                </span>
+              </Card>
+              <Card href="/foods" padding="sm">
+                <span aria-hidden="true" className="text-2xl">
+                  🥘
+                </span>
+                <span className="mt-1 block text-[14px] font-semibold text-text">My foods</span>
+                <span className="block text-xs text-text-2">
+                  {myFoodCount ? `${myFoodCount} added` : "Add your own dish"}
+                </span>
+              </Card>
             </section>
 
             {expiring.count > 0 && (

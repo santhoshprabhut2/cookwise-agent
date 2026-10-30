@@ -9,8 +9,11 @@ Pure TypeScript, no React, no I/O, no browser globals at module scope — everyt
 | `helpers.ts` | `daysBetween`, `mulberry32`, `hashSeed`, `ema`, `mean`, `ceilTo`, `round`, `roundToHalf`, `normalizeText`, `words`, `matchesToken`. |
 | `filters.ts` | Hard diet / allergy / dislike / equipment filters, shared by the planner and the recommender. |
 | `nutrition.ts` | Arithmetic over `Ingredient.nutrition` (per-100 g) → absolute dish totals → per-serving. |
-| `planner.ts` | `generateWeekPlan`, `adaptPlan`, `scoreRecipe`, `explainMeal`, `diffPlans`. |
-| `grocery.ts` | `buildGroceryList`, `groceryTotals`, `shortfall`, `packSizeFor`. |
+| `planner.ts` | `generateWeekPlan`, `adaptPlan`, `scoreRecipe`, `explainMeal`, `diffPlans`, `slotTimeLimit`, `simplicityFit`, `isBatchable`, `fitMealsToSchedule`. |
+| `schedule.ts` | The weekly cooking-time grid: `scheduleCell`, `setScheduleCell`, `materializeSchedule`, `nextSlotTime`, `rushedMealCount`. |
+| `leftovers.ts` | `sanitizeLeftovers` — keeps `PlannedMeal.leftoverOf` links honest after any edit. |
+| `freshness.ts` | `freshnessFit`, `freshBuyEveryDays`, `planFreshVisits` — early spoilers first, and buying milk or meat in trips. |
+| `grocery.ts` | `buildGroceryList`, `groceryTotals`, `uncoveredNeeds`, `shortfall`, `packSizeFor`, `pendingPantryCount`. |
 | `retention-factors.ts` | The USDA-style factor table and the kinetics constants. |
 | `retention.ts` | `estimateRetention`, `liveRetentionHint`, `computeNutritionFromLogs`. |
 | `learning.ts` | `applyFeedback`, `recommend`, `spiceTargetFor`, `emptyPreferenceModel`. |
@@ -67,6 +70,68 @@ minimum 1. `generatedBy` is always `"heuristic"`. Locked meals from `req.lockedM
 inside the week are kept verbatim (only `planId` is re-pointed at the new plan) and their slots
 are not re-filled.
 
+#### Per-meal cooking time
+
+`UserProfile.timeSchedule` is an optional grid of `day → meal → level`, where the level is
+`very_little` (10 min), `little` (20), `some` (30) or `plenty` (no limit). `slotTimeLimit` returns the
+minutes a slot allows: the grid cell when the user set one, otherwise the single
+`timeAvailability` setting. A cell the user set is a **hard rule**. Only recipes that fit are
+offered for that slot; if none of the right meal type fit, any allowed recipe that does is offered
+(a quick breakfast dish at a rushed lunch); if still none, the three fastest. Slots with no cell
+are scored softly as before.
+
+#### Simple dishes
+
+For beginners (`skill`) the time score blends in `simplicityFit`: easy beats hard, and fewer than
+8 ingredients and 6 steps score best. The blend weight is `SIMPLICITY_WEIGHT[skill]`
+(0.35 beginner, 0.15 intermediate, 0 advanced).
+
+#### Cook once, eat twice
+
+A recipe tagged `batch_friendly` that takes 30 minutes or more can be cooked once for two meals.
+When one is picked at lunch or dinner and the next lunch or dinner (at most a day later) is free,
+that meal becomes a **leftover**: same recipe and servings, `leftoverOf` pointing at the cooked
+meal, reheated in 5 minutes. Nothing is cooked for it, and `scoreRecipe` gives batch dishes
+`+4`, or `+14` when that next meal is rushed (under 30 minutes), so a rushed lunch is usually a
+reheated dinner. The generator also **saves a relaxed meal for a rushed one**: if the next meal
+could itself host a leftover for an even more rushed meal after it, it is not spent here.
+Locked meals are never used as a leftover slot.
+
+`sanitizeLeftovers` drops a `leftoverOf` link when the source meal is gone, skipped, eating out,
+changed recipe or is not earlier. The data stores call it after every edit. A leftover cut loose
+that way now has to be cooked, so `fitMealsToSchedule` re-picks it if its dish no longer fits a
+slot the user capped.
+
+#### Early spoilers first
+
+With `opts.ingredients`, each recipe gets `freshnessFit`: every perishable ingredient (shelf
+life up to 7 days, not one bought fresh anyway) scores 100 when used straight after the weekly
+shop, 70 on its last good day and falls steeply after. Shorter-lived items count for more. The
+result adds up to ±12 points (`FRESHNESS_POINTS`), so short-lived dishes land early in the week.
+Items that must be re-bought (below) are exempt. A small `VARIETY_WEEK_REPEAT_PENALTY` also
+stops the week falling into a four-day cycle.
+
+#### Whole plates and the budget ceiling
+
+A curry is a dish, not a lunch, so lunch and dinner should be a whole plate. `isCompleteMeal`
+(see §6) is true for a recipe tagged `complete_meal` or one with 50 g of carbs a serving. Three
+rules follow.
+
+- **Staples are never planned alone.** `isStaple` recipes (rice, chapati) are dropped by
+  `isPlannable`, in the generator and in `recommend`.
+- **Prefer whole plates.** At lunch and dinner `scoreRecipe` subtracts `INCOMPLETE_MEAL_PENALTY`
+  (30) from a recipe that is not a whole plate, shown as `parts.incomplete`. The penalty is
+  waived for the light moods (`light`, `no_cooking`, `healthy`), where a soup or salad is the
+  point. When the catalog offers at least `MIN_WHOLE_PLATE_CHOICES` (5) whole plates for a slot,
+  only those are considered, so a bare curry is never picked over a plate that fits.
+- **The budget is a ceiling.** `BUDGET_CEILING` is 1, so the plan never costs more than the weekly
+  budget. Each slot may spend only what is left after reserving the cheapest meal for every
+  slot still empty (`cheapestMeal`), and `affordableOnly` drops what does not fit. A batch dish
+  is priced as two portions less the cost of the leftover slot it replaces.
+
+Chapati plates take 25 to 30 minutes longer than rice plates, so a rushed slot still gets the
+rice version or a quick dish.
+
 ### `adaptPlan(plan, change, ctx)`
 
 Only meals **on or after `change.date`**, not `locked`, and still `planned` may change. The
@@ -78,7 +143,7 @@ change applies to `change.mealType` when given, otherwise to the whole day (`ski
 | `skip_meal` | Removes the meal from the plan. |
 | `eating_out` | Sets `status: "eating_out"`. If `goal === "weight_loss"`, the day's other editable meals are re-picked under a kcal cap of `slotTarget × 0.8`, biased toward `low_cal` / `high_fiber`. |
 | `guests` | `servings × (1 + guestCount / servingsDefault)`, rounded to 0.5, and swaps to a `guest_friendly` recipe when one exists. |
-| `less_time` | Re-picks any meal whose `prepTimeMin + cookTimeMin` exceeds `availableMinutes`, preferring recipes that fit and biasing the `quick` tag. |
+| `less_time` | Re-picks any meal whose `prepTimeMin + cookTimeMin` exceeds `availableMinutes`, preferring recipes that fit and biasing the `quick` tag. A leftover is left alone: reheating fits any limit of 5 minutes or more. |
 | `mood_change` | Biases tags and applies the mood's predicate: `light → low_cal/high_fiber`, `comfort → comfort/one_pot`, `spicy → spiceLevel ≥ 3`, `no_cooking → prep+cook ≤ 10 min or raw`, plus `mild`, `quick`, `healthy`, `protein`, `budget`. |
 
 ### `diffPlans(before, after)`
@@ -90,7 +155,8 @@ plus removals (only `from…`) and additions (only `to…`), sorted by date then
 ### Explainability
 
 `scoreRecipe(recipe, slot, ctx)` returns `{ total, parts }` with every component plus
-`expiringItems` / `expiringGrams`; `explainMeal(recipe, slot, ctx)` renders the top three as one
+`expiringItems` / `expiringGrams`, `freshness` / `freshItems` and `batch`;
+`explainMeal(recipe, slot, ctx)` renders the top three as one
 line — *"Uses 2 items expiring soon · high protein · 20 min"*.
 
 ---
@@ -100,19 +166,31 @@ line — *"Uses 2 items expiring soon · high protein · 20 min"*.
 `buildGroceryList(plan, recipes, pantry, ingredients)`
 
 1. For each meal still `planned`, add `ingredient.grams × (meal.servings / recipe.servings)` to
-   that ingredient's requirement list, tagged with the meal date.
+   that ingredient's requirement list, tagged with the meal date. A **leftover** is tagged with
+   the day its dish is *cooked*, and asks for nothing once that dish has already been cooked.
 2. Convert pantry rows to grams (`pcs × gramsPerPiece`, fallback 50 g; `ml ≈ g`) into lots
    carrying their expiry.
-3. `shortfall()` walks the requirements in date order and consumes lots **FIFO by expiry**,
+3. `uncoveredNeeds()` walks the requirements in date order and consumes lots **FIFO by expiry**,
    skipping any lot that expires *before* the meal date — food that goes off on Tuesday cannot
-   feed Thursday's dinner.
-4. Round the uncovered grams up to a pack size: spices/salt 50 g, oils 200 ml, grains / flours /
-   dals / legumes 500 g, vegetables 100 g, proteins 250 g, dairy 500 g-ml, fruits & nuts 100 g,
-   other 100 g. `pcs` items round up to whole pieces.
-5. `estimatedCost = grams / 1000 × costPerKg`; `unit` comes from the catalog. Lines with
-   need ≤ 0 are skipped. Items are sorted by name.
+   feed Thursday's dinner. It returns what is left, still dated; `shortfall()` sums it.
+4. **Fresh items** (`freshBuyEveryDays`: milk daily, coriander and mint every 2 days, and
+   anything whose shelf life is 3 days or less, such as chicken, fish and spinach) are not rounded
+   to a pack. `planFreshVisits` splits the uncovered need into shopping trips, one on the first day
+   it is needed and covering the following `everyDays - 1` days, each rounded up to 50 g / ml. The
+   item carries `fresh: { everyDays, visits }` and the list ticks each trip on its own.
+5. Everything else rounds the uncovered grams up to a pack size: spices/salt 50 g, oils 200 ml,
+   grains / flours / dals / legumes 500 g, vegetables 100 g, proteins 250 g, dairy 500 g-ml
+   (butter 100 g, paneer and cheese 200 g), fruits & nuts 100 g, other 100 g. `pcs` items round up
+   to whole pieces.
+6. `estimatedCost = grams / 1000 × costPerKg`; `unit` comes from the catalog. `usedCost` is the
+   same sum over the uncovered grams *before* rounding: what this week's meals actually consume
+   of the list. Lines with need ≤ 0 are skipped. Items are sorted by name.
 
-`groceryTotals(list)` → `{ itemCount, purchasedCount, totalGrams, estimatedCost, purchasedCost, remainingCost }`.
+`groceryTotals(list)` → `{ itemCount, purchasedCount, totalGrams, estimatedCost, usedCost, purchasedCost, remainingCost }`.
+`usedCost` is why a first-week shopping list can look far above a weekly budget: rice, oil and
+spices bought in packs last into later weeks, so only part of the list is eaten this week.
+`pendingPantryCount(list)` counts ticked
+purchases not yet in the pantry, one per ticked trip of a fresh item.
 
 ---
 
@@ -256,11 +334,51 @@ exported so the protocol can be unit-tested without hardware.
 
 ---
 
-## 6. Tests
+## 6. Complete meals and custom foods — `meals.ts`, `custom.ts`
+
+Pure modules. A complete meal is an ordinary `Recipe`, so the planner, grocery list, cooking mode
+and retention model need no special case for it.
+
+### `meals.ts`
+
+- `isStaple(recipe)` — tagged `staple`.
+- `isCompleteMeal(recipe)` — never for a staple; true for the `complete_meal` tag or
+  `COMPLETE_MEAL_MIN_CARBS_G` (50) g of carbs per serving.
+- `isPlannable(recipe, profile)` — allowed for the profile and not a staple.
+- `stapleTiming(staple)` — how it fits beside a main dish. A passive method (boil, simmer, steam,
+  pressure_cook) starts first and adds no time (`first`, `alongside`). Anything else, such as
+  chapati on a tawa, comes last and its time is added.
+- `scaleAmounts(text, factor)` — rewrites the `g` and `ml` amounts in a step's wording.
+- `composeMeal(main, parts, opts)` — joins a main dish and its parts into one recipe. Servings are
+  the main dish's. Each part is scaled by `servings / part.servings`. Ingredients are merged,
+  steps are ordered first-parts, main, rest with part steps titled `"Chapati: Roll the chapatis"`,
+  prep is summed, cook time is the sequential time or the longest alongside part, nutrition and
+  cost are summed, diets are the intersection, and the tags gain `complete_meal` and lose `staple`,
+  `low_cal` and (past 20 minutes) `quick`.
+
+### `custom.ts`
+
+Turns what a user typed into a recipe, so a custom food is as trustworthy as a built-in one.
+
+- `validateCustomFood(input)` — what is wrong, in the user's words; empty means it can be saved.
+- `buildCustomRecipe(input, catalog)` — nutrition from `nutritionFromGrams`, cost from
+  `costPerKg`, diets from `dietsFor`, tags (`complete_meal`, `staple`, `high_protein`, `quick`,
+  `budget`), and three steps: weigh and prepare (every ingredient is added), cook (with the method's
+  temperature window from `METHOD_TEMP_C`, or "Mix" for raw) and serve. A `dish` given `serveWith`
+  staples is run through `composeMeal`, with "Serve" moved after the staple's steps.
+- `customFoodFromRecipe(recipe, userId)` — reads a saved food back into form values. A food saved
+  with a staple comes back as one complete meal with every ingredient listed, and saving it
+  rebuilds the steps.
+- `CustomKind` is `meal` (a whole plate), `dish` (needs rice or chapati) or `side` (a staple).
+
+## 7. Tests
 
 `npm test` (→ `vitest run`, config at `vitest.config.ts`, `@/` aliased to `./src`).
 Engine specs live in `src/lib/engines/__tests__/` and use their own fixtures
 (`fixtures.ts`) rather than `src/lib/data/seed/*`, so they stay stable while the catalog grows.
+`meals.test.ts` and `custom.test.ts` cover composition, scaling and building a custom food;
+`src/lib/data/__tests__/complete-meals.test.ts` checks that lunch and dinner are whole plates across
+diets and seeds, that no staple is planned alone and that the budget ceiling holds.
 
 ## Food-temperature correction (added during integration)
 

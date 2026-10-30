@@ -96,7 +96,7 @@ with `completeOnboarding()`.
 ```ts
 recipes: Recipe[]                 // catalog (RECIPES) + persisted user recipes
 byId(id): Recipe | undefined
-search(q, filters?: { mealType?; tag?; maxMinutes?; diet? }): Recipe[]
+search(q, filters?: { mealType?; tag?; maxMinutes?; diet?; complete?; custom? }): Recipe[]
 upsert(r: Recipe): void
 remove(id): void
 catalog(): Recipe[]               // isPublic only
@@ -106,6 +106,13 @@ reset(): void
 `search` matches name, description, cuisine, tags and ingredient names.
 Only non-public recipes are persisted, so catalog updates ship with the app.
 `totalTimeMin(recipe)` is exported as a helper.
+
+`complete: true` keeps only whole plates (`isCompleteMeal`, so staples such as rice and chapati are
+out) and `custom: true` keeps only foods the user added. **Custom foods** are ordinary non-public
+recipes: `buildCustomRecipe` (`engines/custom.ts`) makes one from the form, `upsert` saves it and
+it is persisted and synced like any user recipe. `remove` deletes it; the My foods screen first
+removes any still-planned meals that use it (`upcomingUses`) so the plan never points at a recipe
+that is gone.
 
 ### `usePantryStore`
 
@@ -161,6 +168,11 @@ reset(): void
 - `applyChange` appends the `ScheduleChange` (id/userId/createdAt filled in) and
   replaces the plan with `adaptPlan(...)`, generating the week first if needed.
 - `MEAL_ORDER` and `sortMeals(meals)` are exported for day rendering.
+- **Leftovers.** A meal with `leftoverOf` re-serves a dish cooked for another meal. After every
+  `updateMeal` / `swapMeal` / `removeMeal`, `generate` and `applyChange`, the store runs
+  `sanitizeLeftovers`, so a link never points at a meal that changed or vanished. A leftover cut
+  loose that way is re-picked with `fitMealsToSchedule` when its dish no longer fits a slot the
+  user capped in `profile.timeSchedule`.
 
 ```ts
 const plan = usePlanStore((s) => s.currentPlan());
@@ -175,7 +187,8 @@ lists: GroceryList[]
 byId(id) / forPlan(planId) / latest(): GroceryList | undefined
 generateForPlan(planId): GroceryList
 togglePurchased(itemId): void
-setPurchased(itemId, purchased): void
+setPurchased(itemId, purchased): void  // on a fresh item this ticks every trip
+toggleVisit(itemId, date): void        // tick one shopping trip of a fresh item
 moveToPantry(listId): PantryItem[]     // returns the rows actually added
 remove(listId): void
 reset(): void
@@ -186,6 +199,11 @@ carries over `purchased` **and** `addedToPantry` per `ingredientId`, so a
 half-shopped list survives a regenerate and nothing is added to the pantry twice.
 `moveToPantry` adds purchased, not-yet-added items with `source: "grocery"` and
 the catalog's default expiry, then flags them `addedToPantry`.
+
+Fresh items (milk, meat, fish, herbs) carry `fresh.visits`, one per shopping trip, and each
+trip has its own `purchased` / `addedToPantry`. `moveToPantry` adds **only the ticked trips**,
+so Monday's milk does not arrive in the pantry together with Friday's, and a rebuilt list keeps
+each trip's tick by its date.
 
 ### `useCookStore`
 
@@ -201,6 +219,7 @@ endStep(stepId, summary?: Partial<StepLog>): void
 addTemp(sample: TempSample): void
 setRetention(est: RetentionEstimate): void
 complete(): CookSession | undefined
+logLeftover(mealId): CookSession | undefined   // eat a reheated leftover
 abandon(): void
 reset(): void
 ```
@@ -216,6 +235,12 @@ reset(): void
   marks the linked planned meal `cooked`, clears `activeId` and returns the session.
 - `activeId` is persisted, so a refresh resumes the cooking flow. Only the last
   `MAX_SESSIONS = 50` sessions are kept.
+- **Cook once, eat twice.** The Cook tab starts a dish that feeds leftovers with
+  `cookServingsFor(plan, meal)` (its own servings plus every waiting leftover), so the scale
+  targets and the pantry deduction cover the whole batch. `complete()` then records only the cook's
+  own portion as eaten. `logLeftover(mealId)` later logs each leftover as a completed session of
+  its own servings with `pantryDeducted: true`, marks the meal `cooked`, and touches nothing in
+  the pantry. Each portion is counted in the day's intake exactly once.
 
 ### `useFeedbackStore` / `usePreferenceStore`
 
@@ -281,14 +306,19 @@ It creates:
   protein, equipment stove·mixer·pressure cooker·frying pan·dosa pan, favourites
   dosa·biryani·egg bhurji, cuisines south/north Indian, spice 2, ₹5,000/month,
   beginner, time "varies", priorities nutrition→budget→time→taste→waste, 2
-  servings, `onboardingComplete: true`.
+  servings, `onboardingComplete: true`, plus the weekly cooking-time grid he described
+  (`DEMO_TIME_SCHEDULE`: Monday and Wednesday mornings 20 min, Wednesday lunch and Thursday
+  morning 10 min, Friday lunch 30 min, everything else free).
 - **Pantry** — the mockup rows with expiry relative to today: Tomato 500 g (2 d),
   Onion 1 kg (5 d), Eggs 6 pcs (7 d), Chicken 500 g (3 d), Spinach 200 g (3 d),
   Milk 1 L (4 d), Rice 1 kg (45 d), Coconut 1 pc (7 d).
-- **Plan** — the current week via `generateWeekPlan`, then today's meals forced to
-  `ragi-dosa` / `chicken-biryani` / `egg-bhurji` (skipped for any recipe id the
-  catalog does not have). Breakfast and lunch are marked `cooked`, so
-  `nextMealToday` returns **Egg Bhurji** on Home, as in the mockup.
+- **Plan** — the current week via `generateWeekPlan`, planned *around* today's
+  meals: `ragi-dosa` / `chicken-biryani` / `egg-bhurji` go in as locked meals first (so their
+  cost counts against the budget), then are unlocked. A mockup dish is pinned only if the recipe
+  exists **and fits the profile's schedule for that meal** (a 20-minute dosa is not forced onto a
+  "very little time" morning; the planner's own pick stays). Breakfast and lunch are marked
+  `cooked`, so `nextMealToday` returns **Egg Bhurji** on Home, as in the mockup. Dinner has no
+  time limit on any day, so that holds every day of the week.
 - **Cook sessions** — completed sessions for those two cooked meals (written
   directly with `pantryDeducted: true`, so the seeded pantry keeps exactly the
   mockup quantities) so Home's kcal ring and `expiringUsageStats` have data.

@@ -54,11 +54,28 @@ export function isStandalone(): boolean {
   );
 }
 
+/**
+ * iPhone and iPad run every browser on Safari's engine, which has no install
+ * event: the only way in is Share, then "Add to Home Screen". Pure so it can be
+ * tested; iPadOS pretends to be a Mac, hence the touch-point check.
+ */
+export function isIosDevice(userAgent: string, platform = "", touchPoints = 0): boolean {
+  if (/iPad|iPhone|iPod/.test(userAgent)) return true;
+  return platform === "MacIntel" && touchPoints > 1;
+}
+
+function currentDeviceIsIos(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return isIosDevice(navigator.userAgent, navigator.platform, navigator.maxTouchPoints);
+}
+
 export interface UseInstallPrompt {
   /** A native install prompt is queued and `install()` will show it. */
   canInstall: boolean;
   /** Shows the prompt. Resolves to true when the user accepted. */
   install(): Promise<boolean>;
+  /** iPhone/iPad, not yet installed: show "Share, then Add to Home Screen". */
+  iosManualInstall: boolean;
 }
 
 export function useInstallPrompt(): UseInstallPrompt {
@@ -68,6 +85,12 @@ export function useInstallPrompt(): UseInstallPrompt {
     subscribe,
     () => deferredPrompt !== null && !isStandalone(),
     () => false, // nothing is installable during SSR
+  );
+
+  const iosManualInstall = useSyncExternalStore(
+    subscribe,
+    () => currentDeviceIsIos() && !isStandalone(),
+    () => false,
   );
 
   const install = useCallback(async (): Promise<boolean> => {
@@ -85,7 +108,7 @@ export function useInstallPrompt(): UseInstallPrompt {
     }
   }, []);
 
-  return { canInstall, install };
+  return { canInstall, install, iosManualInstall };
 }
 
 /** Optional mount point; the hook works without it. Renders nothing. */

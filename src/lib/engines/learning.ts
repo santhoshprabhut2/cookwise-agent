@@ -20,7 +20,7 @@ import type {
 } from "@/lib/types";
 import { clamp, nowIso } from "@/lib/utils";
 import { ema, mean } from "./helpers";
-import { isRecipeAllowed } from "./filters";
+import { isPlannable } from "./meals";
 
 /** Smoothing factor for every affinity update (ARCHITECTURE §5). */
 export const ALPHA = 0.3;
@@ -152,7 +152,7 @@ export function recommend(
   n = 5,
 ): Recipe[] {
   return recipes
-    .filter((r) => isRecipeAllowed(r, profile))
+    .filter((r) => isPlannable(r, profile))
     .map((r) => ({ recipe: r, score: affinityScore(r, model) }))
     .sort((a, b) =>
       b.score === a.score ? a.recipe.name.localeCompare(b.recipe.name) : b.score - a.score,

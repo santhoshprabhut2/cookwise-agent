@@ -3,7 +3,15 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { buildGroceryList } from "@/lib/engines/grocery";
-import type { GroceryItem, GroceryList, ID, PantryItem } from "@/lib/types";
+import type {
+  FreshBuyPlan,
+  GroceryItem,
+  GroceryList,
+  ID,
+  ISODate,
+  PantryItem,
+  Unit,
+} from "@/lib/types";
 import { nowIso, uid } from "@/lib/utils";
 import { INGREDIENTS } from "../seed/ingredients";
 import { persistConfig, trackHydration } from "../storage";
@@ -24,6 +32,8 @@ export interface GroceryState {
   generateForPlan(planId: ID): GroceryList;
   togglePurchased(itemId: ID): void;
   setPurchased(itemId: ID, purchased: boolean): void;
+  /** Tick one shopping trip of a fresh item (milk on Wednesday). */
+  toggleVisit(itemId: ID, date: ISODate): void;
   /** Moves purchased, not-yet-added items into the pantry. Returns what moved. */
   moveToPantry(listId: ID): PantryItem[];
   remove(listId: ID): void;
@@ -31,6 +41,15 @@ export interface GroceryState {
 }
 
 type GroceryPersisted = { lists: GroceryList[] };
+
+/** The shape `usePantryStore.addMany` takes for a bought item. */
+type NewPantryRow = {
+  ingredientId: ID;
+  name: string;
+  quantity: number;
+  unit: Unit;
+  source: "grocery";
+};
 
 /** Purchase state survives a regeneration so a half-shopped list is not lost. */
 function carryOverFlags(
@@ -43,6 +62,26 @@ function carryOverFlags(
   );
   return items.map((i) => {
     const old = prev.get(i.ingredientId);
+    if (i.fresh) {
+      // Each trip keeps its own tick, matched by the day it is made.
+      const oldVisits = new Map((old?.fresh?.visits ?? []).map((v) => [v.date, v] as const));
+      const fresh: FreshBuyPlan = {
+        ...i.fresh,
+        visits: i.fresh.visits.map((v) => ({
+          ...v,
+          purchased: oldVisits.get(v.date)?.purchased ?? old?.purchased ?? false,
+          addedToPantry: oldVisits.get(v.date)?.addedToPantry ?? old?.addedToPantry ?? false,
+        })),
+      };
+      return {
+        ...i,
+        id: i.id || uid(),
+        listId,
+        fresh,
+        purchased: fresh.visits.length > 0 && fresh.visits.every((v) => v.purchased),
+        addedToPantry: fresh.visits.length > 0 && fresh.visits.every((v) => v.addedToPantry),
+      };
+    }
     return {
       ...i,
       id: i.id || uid(),
@@ -128,8 +167,45 @@ export const useGroceryStore = create<GroceryState>()(
                   ...l,
                   updatedAt: ts,
                   items: l.items.map((i) =>
-                    i.id === itemId ? { ...i, purchased } : i,
+                    i.id !== itemId
+                      ? i
+                      : i.fresh
+                        ? {
+                            // Ticking the whole item ticks every trip.
+                            ...i,
+                            purchased,
+                            fresh: {
+                              ...i.fresh,
+                              visits: i.fresh.visits.map((v) => ({ ...v, purchased })),
+                            },
+                          }
+                        : { ...i, purchased },
                   ),
+                }
+              : l,
+          ),
+        });
+      },
+
+      toggleVisit(itemId, date) {
+        const ts = nowIso();
+        set({
+          lists: get().lists.map((l) =>
+            l.items.some((i) => i.id === itemId)
+              ? {
+                  ...l,
+                  updatedAt: ts,
+                  items: l.items.map((i) => {
+                    if (i.id !== itemId || !i.fresh) return i;
+                    const visits = i.fresh.visits.map((v) =>
+                      v.date === date ? { ...v, purchased: !v.purchased } : v,
+                    );
+                    return {
+                      ...i,
+                      fresh: { ...i.fresh, visits },
+                      purchased: visits.every((v) => v.purchased),
+                    };
+                  }),
                 }
               : l,
           ),
@@ -139,32 +215,61 @@ export const useGroceryStore = create<GroceryState>()(
       moveToPantry(listId) {
         const list = get().lists.find((l) => l.id === listId);
         if (!list) return [];
-        const moving = list.items.filter((i) => i.purchased && !i.addedToPantry);
-        if (!moving.length) return [];
 
-        const added = usePantryStore.getState().addMany(
-          moving.map((i) => ({
-            ingredientId: i.ingredientId,
-            name: i.name,
-            quantity: i.quantity,
-            unit: i.unit,
-            source: "grocery" as const,
-          })),
-        );
+        // One pantry row per ticked item, or per ticked trip of a fresh item, so
+        // milk bought on Monday is not added with Friday's milk.
+        const rows: NewPantryRow[] = [];
+        for (const i of list.items) {
+          if (i.fresh) {
+            for (const v of i.fresh.visits) {
+              if (v.purchased && !v.addedToPantry) {
+                rows.push({
+                  ingredientId: i.ingredientId,
+                  name: i.name,
+                  quantity: v.quantity,
+                  unit: i.unit,
+                  source: "grocery",
+                });
+              }
+            }
+          } else if (i.purchased && !i.addedToPantry) {
+            rows.push({
+              ingredientId: i.ingredientId,
+              name: i.name,
+              quantity: i.quantity,
+              unit: i.unit,
+              source: "grocery",
+            });
+          }
+        }
+        if (!rows.length) return [];
 
-        const movedIds = new Set(moving.map((i) => i.id));
+        const added = usePantryStore.getState().addMany(rows);
+
         const ts = nowIso();
         set({
           lists: get().lists.map((l) =>
-            l.id === listId
-              ? {
+            l.id !== listId
+              ? l
+              : {
                   ...l,
                   updatedAt: ts,
-                  items: l.items.map((i) =>
-                    movedIds.has(i.id) ? { ...i, addedToPantry: true } : i,
-                  ),
-                }
-              : l,
+                  items: l.items.map((i) => {
+                    if (i.fresh) {
+                      const visits = i.fresh.visits.map((v) =>
+                        v.purchased && !v.addedToPantry ? { ...v, addedToPantry: true } : v,
+                      );
+                      return {
+                        ...i,
+                        fresh: { ...i.fresh, visits },
+                        addedToPantry: visits.every((v) => v.addedToPantry),
+                      };
+                    }
+                    return i.purchased && !i.addedToPantry
+                      ? { ...i, addedToPantry: true }
+                      : i;
+                  }),
+                },
           ),
         });
         return added;

@@ -28,7 +28,7 @@ export function ProfileSettingsSheet({ open, onClose }: ProfileSettingsSheetProp
   const router = useRouter();
   const { toast } = useToast();
   const { user, demo, signOut } = useAuth();
-  const { canInstall, install } = useInstallPrompt();
+  const { canInstall, install, iosManualInstall } = useInstallPrompt();
 
   const [confirmingReset, setConfirmingReset] = useState(false);
   const [resetting, setResetting] = useState(false);
@@ -122,6 +122,15 @@ export function ProfileSettingsSheet({ open, onClose }: ProfileSettingsSheetProp
               title="Install app"
               subtitle="Add Cookwise to your home screen"
               trailing={<ChevronRight size={18} className="text-text-3" aria-hidden="true" />}
+            />
+          )}
+
+          {iosManualInstall && !canInstall && (
+            <ListRow
+              divider
+              leading={<SettingsTile icon={<Download size={18} />} />}
+              title="Install on iPhone"
+              subtitle="Tap the Share button, then Add to Home Screen"
             />
           )}
 

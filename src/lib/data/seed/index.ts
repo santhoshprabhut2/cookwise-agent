@@ -7,7 +7,17 @@
  * mockup) and the matching grocery list.
  */
 
-import type { CookSession, ID, IngredientLog, MealType } from "@/lib/types";
+import { daysBetween } from "@/lib/engines/helpers";
+import { slotTimeLimit, totalMinutes } from "@/lib/engines/planner";
+import type {
+  CookSession,
+  ID,
+  IngredientLog,
+  ISODate,
+  MealType,
+  Recipe,
+  UserProfile,
+} from "@/lib/types";
 import { addDays, nowIso, toISODate, uid, weekStartOf } from "@/lib/utils";
 import { kvClear, kvGet, kvSet } from "../db";
 import { markSeedComplete, waitForStoresHydrated } from "../storage";
@@ -80,20 +90,42 @@ function seedPantry(): void {
 }
 
 /**
+ * Whether `recipe` can be cooked in the time the profile's weekly schedule
+ * allows for that meal. A profile without a schedule never rules a recipe out.
+ */
+function fitsSchedule(
+  profile: UserProfile | null,
+  recipe: Recipe,
+  date: ISODate,
+  mealType: MealType,
+): boolean {
+  if (!profile?.timeSchedule) return true;
+  const dayIndex = Math.min(6, Math.max(0, daysBetween(weekStartOf(date), date)));
+  return totalMinutes(recipe) <= slotTimeLimit(profile, { date, mealType, dayIndex });
+}
+
+/**
  * Force today's breakfast / lunch / dinner to the mockup recipes when those
  * catalog entries exist, then mark breakfast + lunch cooked so the Home screen
  * surfaces Egg Bhurji as "the next uncooked meal".
+ *
+ * A mockup dish is only forced where it fits the demo profile's own weekly
+ * time schedule: a 40 minute biryani must not appear on a day that says "very
+ * little time". The planner's own pick stays in that slot instead.
  */
 function forceTodaysMeals(planId: ID): void {
   const today = toISODate();
   const recipes = useRecipeStore.getState();
-  const servings = useProfileStore.getState().profile?.servingsDefault ?? 2;
+  const profile = useProfileStore.getState().profile;
+  const servings = profile?.servingsDefault ?? 2;
 
   for (const [mealType, recipeId] of Object.entries(DEMO_TODAY_MEALS) as [
     MealType,
     string,
   ][]) {
-    if (!recipes.byId(recipeId)) continue;
+    const mockup = recipes.byId(recipeId);
+    if (!mockup) continue;
+    if (!fitsSchedule(profile, mockup, today, mealType)) continue;
     const plan = usePlanStore.getState().planById(planId);
     if (!plan) return;
     const existing = plan.meals.find(
@@ -184,6 +216,57 @@ function seedCookedSessions(planId: ID): void {
   }
 }
 
+/**
+ * Plan the week around today's mockup meals instead of pinning them afterwards.
+ * They go in as locked meals, so the planner counts their cost against the
+ * budget and chooses the other eighteen meals to fit, then they are unlocked
+ * again because the mockup shows them as ordinary meals.
+ */
+async function generateAroundMockupMeals(weekStart: ISODate) {
+  const today = toISODate();
+  const recipes = useRecipeStore.getState();
+  const profile = useProfileStore.getState().profile;
+  const servings = profile?.servingsDefault ?? 2;
+  const plans = usePlanStore.getState();
+
+  const pinned = (Object.entries(DEMO_TODAY_MEALS) as [MealType, string][])
+    .map(([mealType, recipeId]) => ({ mealType, recipe: recipes.byId(recipeId) }))
+    .filter(
+      (p): p is { mealType: MealType; recipe: Recipe } =>
+        p.recipe !== undefined && fitsSchedule(profile, p.recipe, today, p.mealType),
+    )
+    .map(({ mealType, recipe }) => ({
+      id: uid(),
+      planId: "seed",
+      date: today,
+      mealType,
+      recipeId: recipe.id,
+      servings,
+      locked: true,
+      status: "planned" as const,
+    }));
+
+  if (pinned.length > 0 && profile) {
+    const ts = nowIso();
+    plans.upsertPlan({
+      id: uid(),
+      userId: profile.id,
+      weekStart,
+      meals: pinned,
+      generatedBy: "heuristic",
+      createdAt: ts,
+      updatedAt: ts,
+    });
+  }
+
+  const plan = await plans.generate(weekStart);
+  const pinnedIds = new Set(pinned.map((m) => m.id));
+  for (const meal of plan.meals) {
+    if (pinnedIds.has(meal.id)) usePlanStore.getState().lockMeal(meal.id, false);
+  }
+  return usePlanStore.getState().planById(plan.id) ?? plan;
+}
+
 async function runSeed(): Promise<void> {
   seedProfile();
   seedPantry();
@@ -191,7 +274,7 @@ async function runSeed(): Promise<void> {
   const weekStart = weekStartOf(toISODate());
   const plan =
     usePlanStore.getState().currentPlan(weekStart) ??
-    (await usePlanStore.getState().generate(weekStart));
+    (await generateAroundMockupMeals(weekStart));
 
   forceTodaysMeals(plan.id);
   seedCookedSessions(plan.id);

@@ -9,6 +9,7 @@
  * - Indian home cooking is the default context (grams, rupees, regional names).
  */
 
+import { SCHEDULED_MEAL_TYPES, SLOT_TIME_MIN, WEEKDAY_KEYS } from "@/lib/engines/constants";
 import { addDays } from "@/lib/utils";
 import type {
   AiAdaptRequest,
@@ -97,7 +98,26 @@ function recipeLines(recipes: RecipeSummary[]): string {
     .join("\n");
 }
 
+/**
+ * The meals the user has capped, as one line, e.g. "mon breakfast 20 min, wed
+ * lunch 10 min". Unlimited meals are left out. `undefined` when none are capped.
+ */
+export function timeLimitsLine(profile: AiMealPlanRequest["profile"]): string | undefined {
+  const parts: string[] = [];
+  for (const day of WEEKDAY_KEYS) {
+    for (const meal of SCHEDULED_MEAL_TYPES) {
+      const level = profile.timeSchedule?.[day]?.[meal];
+      if (level && Number.isFinite(SLOT_TIME_MIN[level])) {
+        parts.push(`${day} ${meal} ${SLOT_TIME_MIN[level]} min`);
+      }
+    }
+  }
+  if (parts.length === 0) return undefined;
+  return `cooking time limits, prep plus cook, strict (every other meal is unlimited): ${parts.join(", ")}`;
+}
+
 function profileBlock(profile: AiMealPlanRequest["profile"]): string {
+  const limits = timeLimitsLine(profile);
   return [
     `name: ${profile.name || "the cook"}`,
     `diet: ${profile.diet}`,
@@ -115,6 +135,7 @@ function profileBlock(profile: AiMealPlanRequest["profile"]): string {
     `priorities (most important first): ${profile.priorities.join(" > ") || "nutrition"}`,
     `monthly budget: ₹${profile.budgetMonthly}`,
     `default servings: ${profile.servingsDefault}`,
+    ...(limits ? [limits] : []),
   ].join("\n");
 }
 

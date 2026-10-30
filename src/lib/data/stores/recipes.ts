@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { isCompleteMeal } from "@/lib/engines/meals";
 import type { DietType, ID, MealType, Recipe, RecipeTag } from "@/lib/types";
 import { RECIPES } from "../seed/recipes";
 import { persistConfig, trackHydration } from "../storage";
@@ -14,6 +15,10 @@ export interface RecipeFilters {
   /** prep + cook time upper bound. */
   maxMinutes?: number;
   diet?: DietType;
+  /** Only whole plates: a main dish with its rice, chapati or other staple. */
+  complete?: boolean;
+  /** Only foods the user added themselves. */
+  custom?: boolean;
 }
 
 export interface RecipeState {
@@ -65,6 +70,8 @@ export const useRecipeStore = create<RecipeState>()(
             return false;
           }
           if (f.diet && !r.diets.includes(f.diet)) return false;
+          if (f.complete && !isCompleteMeal(r)) return false;
+          if (f.custom && r.isPublic) return false;
           return true;
         });
       },

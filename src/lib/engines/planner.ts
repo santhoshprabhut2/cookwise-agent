@@ -29,28 +29,48 @@ import type {
 } from "@/lib/types";
 import { addDays, clamp, humanize, nowIso, uid } from "@/lib/utils";
 import {
+  BATCH_BASE_POINTS,
+  BATCH_MEAL_TYPES,
+  BATCH_MIN_TOTAL_MIN,
+  BATCH_RELIEF_POINTS,
+  BUDGET_CEILING,
   DAYS_PER_WEEK,
   DEFAULT_PRIORITY_ORDER,
   EATING_OUT_KCAL_FACTOR,
   ENERGY_INGREDIENT_HINTS,
+  FASTEST_FALLBACK_COUNT,
+  FRESHNESS_POINTS,
+  INCOMPLETE_MEAL_PENALTY,
   LAST_WEEKDAY_INDEX,
+  LIGHT_MOODS,
+  MIN_WHOLE_PLATE_CHOICES,
   MEAL_KCAL_SPLIT,
   MOOD_SPECS,
   PLAN_MEAL_TYPES,
   PRIORITY_WEIGHTS,
+  REHEAT_MIN,
+  SCHEDULED_MEAL_TYPES,
   SCORE_JITTER,
+  SIMPLE_MAX_INGREDIENTS,
+  SIMPLE_MAX_STEPS,
+  SIMPLICITY_WEIGHT,
+  SLOT_TIME_MIN,
   TAG_PHRASES,
   TIME_LIMIT_MIN,
   VARIETY_SAME_CUISINE_PENALTY,
   VARIETY_SAME_METHOD_PENALTY,
   VARIETY_SAME_RECIPE_PENALTY,
+  VARIETY_WEEK_REPEAT_PENALTY,
   VARIETY_WINDOW_DAYS,
   WASTE_SATURATION_G,
   WASTE_WINDOW_DAYS,
+  WEEKDAY_KEYS,
   WEEKS_PER_MONTH,
   type MoodSpec,
 } from "./constants";
-import { isRecipeAllowed } from "./filters";
+import { freshnessFit } from "./freshness";
+import { sanitizeLeftovers } from "./leftovers";
+import { isCompleteMeal, isPlannable } from "./meals";
 import {
   daysBetween,
   hashSeed,
@@ -62,6 +82,8 @@ import {
 } from "./helpers";
 import { gramsOf, indexIngredients } from "./nutrition";
 
+export { sanitizeLeftovers };
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -71,6 +93,10 @@ export interface PlannerContext {
   recipes: Recipe[];
   pantry: PantryItem[];
   preferences?: PreferenceModel;
+  /** Catalog, so re-planning can order perishable ingredients. Optional. */
+  ingredients?: Ingredient[];
+  /** Reference date for "this week's shop"; defaults to the plan's week start. */
+  today?: ISODate;
 }
 
 /** One (day, mealType) cell of the week grid. */
@@ -108,6 +134,19 @@ export interface ScoreContext {
   tagBias?: Partial<Record<RecipeTag, number>>;
   /** Seeded PRNG. When absent, scoring is fully deterministic (no jitter). */
   rng?: () => number;
+  /** Catalog by id. With `shopDate` it enables the early-spoilers-first ordering. */
+  ingredientById?: Map<ID, Ingredient>;
+  /** The day the week's groceries are bought; freshness is counted from here. */
+  shopDate?: ISODate;
+  /**
+   * Meal type of the next lunch/dinner when it is free to hold a leftover, so a
+   * batch-friendly dish cooked now can be reheated there.
+   */
+  batchTarget?: MealType;
+  /** True when that next meal is rushed, which makes a leftover worth more. */
+  batchRushed?: boolean;
+  /** Do not mark down a lunch or dinner for lacking rice or chapati (a "light" mood). */
+  waiveCompleteMeal?: boolean;
 }
 
 export interface RecipeScore {
@@ -185,6 +224,51 @@ export function timeLimitFor(ta: TimeAvailability, dayIndex: number): number {
       : Number.POSITIVE_INFINITY;
   }
   return TIME_LIMIT_MIN[ta] ?? TIME_LIMIT_MIN.medium;
+}
+
+/** Prep plus cook minutes for a recipe. */
+export function totalMinutes(recipe: Recipe): number {
+  return (recipe.prepTimeMin ?? 0) + (recipe.cookTimeMin ?? 0);
+}
+
+/** The schedule cell for a slot, when the user has set one. */
+function scheduledTime(profile: UserProfile, slot: MealSlot) {
+  const day = WEEKDAY_KEYS[slot.dayIndex];
+  const meal = SCHEDULED_MEAL_TYPES.find((m) => m === slot.mealType);
+  if (!day || !meal) return undefined;
+  return profile.timeSchedule?.[day]?.[meal];
+}
+
+/**
+ * Minutes of prep+cook a specific slot allows. The user's weekly schedule wins
+ * when it covers the slot; otherwise the single `timeAvailability` setting.
+ */
+export function slotTimeLimit(profile: UserProfile, slot: MealSlot): number {
+  const level = scheduledTime(profile, slot);
+  if (level) return SLOT_TIME_MIN[level] ?? Number.POSITIVE_INFINITY;
+  return timeLimitFor(profile.timeAvailability, slot.dayIndex);
+}
+
+/** 0..100: how easy a recipe is for a beginner (few ingredients, few steps, easy). */
+export function simplicityFit(recipe: Recipe): number {
+  const difficulty =
+    recipe.difficulty === "easy" ? 100 : recipe.difficulty === "medium" ? 55 : 20;
+  const extraIngredients = Math.max(
+    0,
+    (recipe.ingredients?.length ?? 0) - SIMPLE_MAX_INGREDIENTS,
+  );
+  const extraSteps = Math.max(0, (recipe.steps?.length ?? 0) - SIMPLE_MAX_STEPS);
+  const ingredients = clamp(100 - 7 * extraIngredients, 30, 100);
+  const steps = clamp(100 - 12 * extraSteps, 30, 100);
+  return 0.55 * difficulty + 0.3 * ingredients + 0.15 * steps;
+}
+
+/** A long dish that keeps well and can be cooked once for two meals. */
+export function isBatchable(recipe: Recipe): boolean {
+  return (
+    (recipe.tags ?? []).includes("batch_friendly") &&
+    totalMinutes(recipe) >= BATCH_MIN_TOTAL_MIN
+  );
 }
 
 /**
@@ -274,11 +358,16 @@ function nutritionFit(recipe: Recipe, slot: MealSlot, profile: UserProfile): num
 }
 
 function timeFit(recipe: Recipe, slot: MealSlot, profile: UserProfile): number {
-  const total = (recipe.prepTimeMin ?? 0) + (recipe.cookTimeMin ?? 0);
-  const limit = timeLimitFor(profile.timeAvailability, slot.dayIndex);
-  if (!Number.isFinite(limit)) return clamp(100 - total * 0.4, 40, 100);
-  if (total <= limit) return clamp(100 - 40 * (total / limit), 60, 100);
-  return clamp(60 - (total - limit) * 2.5, 0, 60);
+  const total = totalMinutes(recipe);
+  const limit = slotTimeLimit(profile, slot);
+  let fit: number;
+  if (!Number.isFinite(limit)) fit = clamp(100 - total * 0.4, 40, 100);
+  else if (total <= limit) fit = clamp(100 - 40 * (total / limit), 60, 100);
+  else fit = clamp(60 - (total - limit) * 2.5, 0, 60);
+
+  // "Make the dishes simple": beginners are pulled towards easy recipes.
+  const simple = SIMPLICITY_WEIGHT[profile.skill] ?? 0;
+  return simple > 0 ? (1 - simple) * fit + simple * simplicityFit(recipe) : fit;
 }
 
 function budgetFit(recipe: Recipe, ctx: ScoreContext, servings: number): number {
@@ -397,6 +486,8 @@ function varietyPenalty(recipe: Recipe, slot: MealSlot, ctx: ScoreContext): numb
           0,
           VARIETY_SAME_RECIPE_PENALTY - 10 * gap,
         );
+      } else if (!m.leftoverOf) {
+        penalty += VARIETY_WEEK_REPEAT_PENALTY;
       }
     }
     if (m.date === slot.date && byId) {
@@ -409,6 +500,37 @@ function varietyPenalty(recipe: Recipe, slot: MealSlot, ctx: ScoreContext): numb
   penalty += VARIETY_SAME_METHOD_PENALTY * sameMethodToday;
   penalty += VARIETY_SAME_CUISINE_PENALTY * sameCuisineToday;
   return penalty;
+}
+
+interface FreshPoints {
+  /** Signed points added to the total: positive when the day suits the ingredients. */
+  points: number;
+  items: number;
+  /** 0..100, 50 neutral. */
+  score: number;
+}
+
+/** Early spoilers first: reward cooking short-lived ingredients while they are fresh. */
+function freshnessPoints(recipe: Recipe, slot: MealSlot, ctx: ScoreContext): FreshPoints {
+  if (!ctx.ingredientById || !ctx.shopDate) return { points: 0, items: 0, score: 50 };
+  const fit = freshnessFit(
+    recipe,
+    daysBetween(ctx.shopDate, slot.date),
+    ctx.ingredientById,
+  );
+  if (fit.items === 0) return { points: 0, items: 0, score: 50 };
+  return {
+    points: FRESHNESS_POINTS * ((fit.score - 50) / 50),
+    items: fit.items,
+    score: fit.score,
+  };
+}
+
+/** Bonus for a batch dish whose leftovers can feed the next lunch or dinner. */
+function batchReliefPoints(recipe: Recipe, ctx: ScoreContext): number {
+  if (!ctx.batchTarget || !isBatchable(recipe)) return 0;
+  if (!(recipe.mealTypes ?? []).includes(ctx.batchTarget)) return 0;
+  return BATCH_BASE_POINTS + (ctx.batchRushed ? BATCH_RELIEF_POINTS : 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -434,6 +556,15 @@ export function scoreRecipe(
   const taste = tasteFit(recipe, ctx);
   const variety = varietyPenalty(recipe, slot, ctx);
   const jitter = ctx.rng ? ctx.rng() * SCORE_JITTER : 0;
+  const fresh = freshnessPoints(recipe, slot, ctx);
+  const relief = batchReliefPoints(recipe, ctx);
+  // A lunch or dinner that is only a curry or a side is not a meal yet.
+  const incomplete =
+    !ctx.waiveCompleteMeal &&
+    (slot.mealType === "lunch" || slot.mealType === "dinner") &&
+    !isCompleteMeal(recipe)
+      ? INCOMPLETE_MEAL_PENALTY
+      : 0;
 
   const weighted =
     w.nutrition * nutrition +
@@ -443,7 +574,7 @@ export function scoreRecipe(
     w.taste * taste;
 
   return {
-    total: clamp(weighted - variety + jitter, 0, 100),
+    total: clamp(weighted - variety - incomplete + jitter + fresh.points + relief, 0, 100),
     parts: {
       nutrition,
       time,
@@ -451,6 +582,10 @@ export function scoreRecipe(
       waste: waste.score,
       taste,
       variety: -variety,
+      incomplete: incomplete === 0 ? 0 : -incomplete,
+      freshness: fresh.points,
+      freshItems: fresh.items,
+      batch: relief,
       expiringItems: waste.items,
       expiringGrams: Math.round(waste.grams),
     },
@@ -472,6 +607,9 @@ export function explainMeal(
       `Uses ${waste.items} item${waste.items === 1 ? "" : "s"} expiring soon`,
     );
   }
+
+  const fresh = freshnessPoints(recipe, slot, ctx);
+  if (fresh.items > 0 && fresh.score >= 85) parts.push("uses fresh produce early");
 
   for (const tag of recipe.tags ?? []) {
     const phrase = TAG_PHRASES[tag];
@@ -542,6 +680,61 @@ function consumeExpiring(
   }
 }
 
+/**
+ * Candidates for one slot. When the weekly schedule caps this slot's time, only
+ * recipes that fit are offered, so "Thursday morning: very little time" is a
+ * rule rather than a preference. If nothing of the right meal type fits, any
+ * allowed recipe that does is used; failing that, the fastest few.
+ */
+function candidatesForSlot(
+  allowed: readonly Recipe[],
+  slot: MealSlot,
+  profile: UserProfile,
+): Recipe[] {
+  const base = candidatesFor(allowed, slot.mealType);
+  if (!scheduledTime(profile, slot)) return base;
+  const limit = slotTimeLimit(profile, slot);
+  if (!Number.isFinite(limit)) return base;
+
+  const fits = (r: Recipe) => totalMinutes(r) <= limit;
+  const ofType = base.filter(fits);
+  if (ofType.length > 0) return ofType;
+  const anyType = allowed.filter(fits);
+  if (anyType.length > 0) return anyType;
+  return [...base]
+    .sort((a, b) => totalMinutes(a) - totalMinutes(b))
+    .slice(0, FASTEST_FALLBACK_COUNT);
+}
+
+/**
+ * Keep only the dishes the budget can still afford. `room` is what the week may
+ * still spend on this meal after setting aside the cheapest possible meals for
+ * the slots that follow. When nothing is affordable the cheapest few are kept,
+ * so the week still fills and overspends as little as it can.
+ */
+function affordableOnly(
+  pool: readonly Recipe[],
+  room: number,
+  costOf: (r: Recipe) => number,
+): Recipe[] {
+  if (!Number.isFinite(room)) return [...pool];
+  const fits = pool.filter((r) => costOf(r) <= room);
+  if (fits.length > 0) return fits;
+  return [...pool].sort((a, b) => costOf(a) - costOf(b)).slice(0, FASTEST_FALLBACK_COUNT);
+}
+
+/** The next lunch or dinner after `slot`, if it is no more than a day later. */
+function nextMainSlot(grid: readonly MealSlot[], slot: MealSlot): MealSlot | undefined {
+  const at = grid.findIndex((s) => s.date === slot.date && s.mealType === slot.mealType);
+  if (at < 0) return undefined;
+  for (let j = at + 1; j < grid.length; j += 1) {
+    const next = grid[j];
+    if (daysBetween(slot.date, next.date) > 1) return undefined;
+    if (BATCH_MEAL_TYPES.includes(next.mealType)) return next;
+  }
+  return undefined;
+}
+
 export function generateWeekPlan(
   req: MealPlanRequest,
   recipes: Recipe[],
@@ -552,7 +745,7 @@ export function generateWeekPlan(
   const { profile, weekStart } = req;
 
   const recipeById = new Map<ID, Recipe>(recipes.map((r) => [r.id, r]));
-  const allowed = recipes.filter((r) => isRecipeAllowed(r, profile));
+  const allowed = recipes.filter((r) => isPlannable(r, profile));
   const rng = mulberry32(hashSeed(weekStart, profile.id, opts.seed ?? ""));
   const servings = servingsFor(profile, req.preferences);
   const weeklyBudget = (profile.budgetMonthly || 0) / WEEKS_PER_MONTH;
@@ -564,6 +757,17 @@ export function generateWeekPlan(
   );
 
   const weekEnd = addDays(weekStart, DAYS_PER_WEEK - 1);
+
+  // Early spoilers first: freshness is counted from the day the groceries are
+  // bought, which is the start of the week or today when planning mid-week.
+  const ingredientById = opts.ingredients?.length
+    ? indexIngredients(opts.ingredients)
+    : undefined;
+  const shopDate =
+    opts.today && opts.today > weekStart && opts.today <= weekEnd
+      ? opts.today
+      : weekStart;
+
   const locked: PlannedMeal[] = (req.lockedMeals ?? [])
     .filter((m) => m.date >= weekStart && m.date <= weekEnd)
     .map((m) => ({ ...m, planId, locked: true }));
@@ -576,12 +780,53 @@ export function generateWeekPlan(
     if (r) spent += (r.costPerServing ?? 0) * m.servings;
   }
 
-  const open = weekSlots(weekStart).filter(
-    (s) => !lockedKeys.has(slotKey(s.date, s.mealType)),
-  );
+  const grid = weekSlots(weekStart);
+  const open = grid.filter((s) => !lockedKeys.has(slotKey(s.date, s.mealType)));
+  /** Slots already holding a leftover decided at an earlier slot. */
+  const prefilled = new Set<string>();
   let remaining = open.length;
 
-  for (const slot of open) {
+  // The cheapest a meal of each type can be (a whole plate for lunch and dinner),
+  // used to keep enough budget aside for the meals still to come.
+  const cheapestMeal = (mealType: MealType): number => {
+    const pool = candidatesFor(allowed, mealType);
+    const whole = pool.filter(isCompleteMeal);
+    const basis =
+      mealType !== "breakfast" && whole.length >= MIN_WHOLE_PLATE_CHOICES ? whole : pool;
+    const costs = basis.map((r) => (r.costPerServing ?? 0) * servings);
+    return costs.length > 0 ? Math.min(...costs) : 0;
+  };
+  const floors: Record<string, number> = {
+    breakfast: cheapestMeal("breakfast"),
+    lunch: cheapestMeal("lunch"),
+    dinner: cheapestMeal("dinner"),
+  };
+
+  for (const [at, slot] of open.entries()) {
+    if (prefilled.has(slotKey(slot.date, slot.mealType))) continue;
+
+    // Could this slot's dish also feed the next lunch or dinner?
+    const target = BATCH_MEAL_TYPES.includes(slot.mealType)
+      ? nextMainSlot(grid, slot)
+      : undefined;
+    let targetFree =
+      target !== undefined && !lockedKeys.has(slotKey(target.date, target.mealType))
+        ? target
+        : undefined;
+
+    // Save a relaxed meal for a rushed one: when the next meal could itself
+    // cook a dish for an even more rushed meal after it, do not spend it here.
+    if (targetFree && slotTimeLimit(profile, targetFree) >= BATCH_MIN_TOTAL_MIN) {
+      const after = nextMainSlot(grid, targetFree);
+      if (
+        after &&
+        !lockedKeys.has(slotKey(after.date, after.mealType)) &&
+        slotTimeLimit(profile, after) < BATCH_MIN_TOTAL_MIN
+      ) {
+        targetFree = undefined;
+      }
+    }
+
     const ctx: ScoreContext = {
       profile,
       preferences: req.preferences,
@@ -593,13 +838,48 @@ export function generateWeekPlan(
       remainingMeals: remaining,
       servings,
       rng,
+      ingredientById,
+      shopDate,
+      batchTarget: targetFree?.mealType,
+      batchRushed: targetFree
+        ? slotTimeLimit(profile, targetFree) < BATCH_MIN_TOTAL_MIN
+        : undefined,
     };
-    const best = bestOf(candidatesFor(allowed, slot.mealType), slot, ctx);
+    // Budget as a ceiling: set aside the cheapest possible meals for the slots
+    // still to come, and offer only the dishes that fit in what is left. A batch
+    // dish also pays for the leftover it will feed.
+    let pool = candidatesForSlot(allowed, slot, profile);
+    // Lunch and dinner are whole plates whenever any whole plate is allowed.
+    if (slot.mealType !== "breakfast") {
+      const whole = pool.filter(isCompleteMeal);
+      if (whole.length >= MIN_WHOLE_PLATE_CHOICES) pool = whole;
+    }
+    if (weeklyBudget > 0) {
+      let reserve = 0;
+      for (const later of open.slice(at + 1)) {
+        if (!prefilled.has(slotKey(later.date, later.mealType))) {
+          reserve += floors[later.mealType] ?? 0;
+        }
+      }
+      const room = weeklyBudget * BUDGET_CEILING - spent - reserve;
+      const leftoverType = targetFree?.mealType;
+      pool = affordableOnly(pool, room + 0.0001, (r) => {
+        const single = (r.costPerServing ?? 0) * servings;
+        const feedsLeftover =
+          leftoverType !== undefined &&
+          isBatchable(r) &&
+          (r.mealTypes ?? []).includes(leftoverType);
+        // The leftover meal is paid for now, so its slot needs no reserve.
+        return feedsLeftover ? 2 * single - (floors[leftoverType] ?? 0) : single;
+      });
+    }
+    const best = bestOf(pool, slot, ctx);
     remaining -= 1;
     if (!best) continue;
 
+    const mealId = uid();
     chosen.push({
-      id: uid(),
+      id: mealId,
       planId,
       date: slot.date,
       mealType: slot.mealType,
@@ -610,17 +890,123 @@ export function generateWeekPlan(
     });
     spent += (best.costPerServing ?? 0) * servings;
     consumeExpiring(expiring, best, servings);
+
+    // Cook once, eat twice: a long, reheat-friendly dish also feeds the next
+    // lunch or dinner, so that meal needs reheating rather than cooking.
+    if (
+      targetFree &&
+      isBatchable(best) &&
+      (best.mealTypes ?? []).includes(targetFree.mealType)
+    ) {
+      chosen.push({
+        id: uid(),
+        planId,
+        date: targetFree.date,
+        mealType: targetFree.mealType,
+        recipeId: best.id,
+        servings,
+        locked: false,
+        status: "planned",
+        leftoverOf: mealId,
+      });
+      prefilled.add(slotKey(targetFree.date, targetFree.mealType));
+      remaining -= 1;
+      spent += (best.costPerServing ?? 0) * servings;
+      consumeExpiring(expiring, best, servings);
+    }
   }
 
   return {
     id: planId,
     userId: profile.id,
     weekStart,
-    meals: chosen.sort(compareMeals),
+    meals: sanitizeLeftovers(chosen).sort(compareMeals),
     generatedBy: "heuristic",
     createdAt: ts,
     updatedAt: ts,
   };
+}
+
+/**
+ * Re-pick the named meals whose dish no longer fits the time their slot allows.
+ *
+ * A leftover only fits a rushed slot because it is reheated. Once its source
+ * dish is swapped or removed the link is cut and the meal would have to be
+ * cooked, so a 40 minute dish can end up in a "very little time" slot. This
+ * gives such meals a dish that fits. It touches only slots the user's weekly
+ * schedule caps, and never a locked meal or one that is already done.
+ */
+export function fitMealsToSchedule(
+  plan: MealPlan,
+  mealIds: readonly ID[],
+  ctx: PlannerContext,
+): MealPlan {
+  const { profile } = ctx;
+  const targets = new Set(mealIds);
+  const recipeById = new Map<ID, Recipe>(ctx.recipes.map((r) => [r.id, r]));
+  const allowed = ctx.recipes.filter((r) => isPlannable(r, profile));
+  const weeklyBudget = (profile.budgetMonthly || 0) / WEEKS_PER_MONTH;
+  const planEnd = addDays(plan.weekStart, DAYS_PER_WEEK - 1);
+  const shopDate =
+    ctx.today && ctx.today > plan.weekStart && ctx.today <= planEnd
+      ? ctx.today
+      : plan.weekStart;
+  const expiring = expiringStock(
+    ctx.pantry ?? [],
+    ctx.today ?? plan.weekStart,
+    WASTE_WINDOW_DAYS,
+    ctx.ingredients,
+  );
+  const ingredientById = ctx.ingredients?.length
+    ? indexIngredients(ctx.ingredients)
+    : undefined;
+  const rng = mulberry32(hashSeed(plan.id, "fit-to-schedule"));
+
+  const meals: PlannedMeal[] = plan.meals.map((m) => ({ ...m }));
+  const spentElsewhere = (exclude: PlannedMeal): number =>
+    meals.reduce((sum, m) => {
+      if (m === exclude || m.status === "skipped") return sum;
+      const r = recipeById.get(m.recipeId);
+      return sum + (r ? (r.costPerServing ?? 0) * m.servings : 0);
+    }, 0);
+
+  let changed = false;
+  for (const meal of meals) {
+    if (!targets.has(meal.id) || meal.locked || meal.status !== "planned") continue;
+    if (meal.leftoverOf) continue; // reheating needs no cooking time
+
+    const slot: MealSlot = {
+      date: meal.date,
+      mealType: meal.mealType,
+      dayIndex: clamp(daysBetween(plan.weekStart, meal.date), 0, DAYS_PER_WEEK - 1),
+    };
+    if (!scheduledTime(profile, slot)) continue; // no explicit limit to honour
+
+    const current = recipeById.get(meal.recipeId);
+    if (current && totalMinutes(current) <= slotTimeLimit(profile, slot)) continue;
+
+    const best = bestOf(candidatesForSlot(allowed, slot, profile), slot, {
+      profile,
+      preferences: ctx.preferences,
+      expiring,
+      chosen: meals.filter((m) => m !== meal),
+      recipeById,
+      weeklyBudget,
+      spentSoFar: spentElsewhere(meal),
+      remainingMeals: 1,
+      servings: meal.servings,
+      rng,
+      ingredientById,
+      shopDate,
+    });
+    if (best && best.id !== meal.recipeId) {
+      meal.recipeId = best.id;
+      changed = true;
+    }
+  }
+
+  if (!changed) return plan;
+  return { ...plan, meals: sanitizeLeftovers(meals), updatedAt: nowIso() };
 }
 
 // ---------------------------------------------------------------------------
@@ -654,10 +1040,18 @@ export function adaptPlan(
   const { profile } = ctx;
   const meals: PlannedMeal[] = plan.meals.map((m) => ({ ...m }));
   const recipeById = new Map<ID, Recipe>(ctx.recipes.map((r) => [r.id, r]));
-  const allowed = ctx.recipes.filter((r) => isRecipeAllowed(r, profile));
+  const allowed = ctx.recipes.filter((r) => isPlannable(r, profile));
   const weeklyBudget = (profile.budgetMonthly || 0) / WEEKS_PER_MONTH;
   const expiring = expiringStock(ctx.pantry ?? [], change.date, WASTE_WINDOW_DAYS);
   const rng = mulberry32(hashSeed(plan.id, change.id, change.type, change.date));
+  const ingredientById = ctx.ingredients?.length
+    ? indexIngredients(ctx.ingredients)
+    : undefined;
+  const planEnd = addDays(plan.weekStart, DAYS_PER_WEEK - 1);
+  const shopDate =
+    ctx.today && ctx.today > plan.weekStart && ctx.today <= planEnd
+      ? ctx.today
+      : plan.weekStart;
 
   const editable = (m: PlannedMeal): boolean =>
     !m.locked && m.status === "planned" && m.date >= change.date;
@@ -679,6 +1073,7 @@ export function adaptPlan(
     meal: PlannedMeal,
     prefer: (r: Recipe) => boolean,
     bias?: Partial<Record<RecipeTag, number>>,
+    waiveCompleteMeal = false,
   ): Recipe | undefined => {
     const slot: MealSlot = {
       date: meal.date,
@@ -701,6 +1096,9 @@ export function adaptPlan(
       servings: meal.servings,
       tagBias: bias,
       rng,
+      ingredientById,
+      shopDate,
+      waiveCompleteMeal,
     };
     return bestOf(finalPool, slot, sctx);
   };
@@ -758,6 +1156,8 @@ export function adaptPlan(
       const limit = change.availableMinutes ?? TIME_LIMIT_MIN.medium;
       const fits = (r: Recipe) => (r.prepTimeMin ?? 0) + (r.cookTimeMin ?? 0) <= limit;
       for (const m of targets()) {
+        // A leftover only needs reheating, which fits any realistic limit.
+        if (m.leftoverOf && limit >= REHEAT_MIN) continue;
         const current = recipeById.get(m.recipeId);
         if (current && fits(current)) continue;
         const r = repick(m, fits, { quick: 0.5 });
@@ -768,8 +1168,11 @@ export function adaptPlan(
 
     case "mood_change": {
       const spec = moodSpecFor(change.moodTags);
+      const wantsLight = (change.moodTags ?? []).some((t) =>
+        LIGHT_MOODS.includes(normalizeText(t).replace(/ /g, "_")),
+      );
       for (const m of targets()) {
-        const r = repick(m, spec.match, spec.bias);
+        const r = repick(m, spec.match, spec.bias, wantsLight);
         if (r) m.recipeId = r.id;
       }
       break;
@@ -778,7 +1181,7 @@ export function adaptPlan(
 
   return {
     ...plan,
-    meals: meals.sort(compareMeals),
+    meals: sanitizeLeftovers(meals.sort(compareMeals)),
     updatedAt: nowIso(),
   };
 }

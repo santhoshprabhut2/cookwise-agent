@@ -15,7 +15,7 @@ import {
 } from "@/components/ui";
 import { useHydrated } from "@/lib/data/storage";
 import { useGroceryStore, usePlanStore } from "@/lib/data/stores";
-import { groceryTotals } from "@/lib/engines/grocery";
+import { groceryTotals, pendingPantryCount } from "@/lib/engines/grocery";
 import { formatINR, toISODate, weekStartOf } from "@/lib/utils";
 
 function GroceryScreen() {
@@ -39,10 +39,7 @@ function GroceryScreen() {
     [list],
   );
 
-  const pendingPantry = useMemo(
-    () => (list?.items ?? []).filter((i) => i.purchased && !i.addedToPantry).length,
-    [list],
-  );
+  const pendingPantry = useMemo(() => (list ? pendingPantryCount(list) : 0), [list]);
 
   const regenerate = useCallback(() => {
     if (!plan) return;
@@ -155,6 +152,14 @@ function GroceryScreen() {
               <p className="mt-0.5 text-xs text-text-2">
                 covers {weekRangeLabel(weekStart)}
               </p>
+              {totals && totals.usedCost < totals.estimatedCost * 0.95 && (
+                <p className="mt-1 text-xs text-text-2">
+                  Only about{" "}
+                  <span className="font-semibold text-text">{formatINR(totals.usedCost)}</span>{" "}
+                  of this is eaten this week. The rest is rice, oil and spices that last into
+                  later weeks.
+                </p>
+              )}
             </div>
           </div>
 
@@ -185,6 +190,7 @@ function GroceryScreen() {
             category={g.category}
             items={g.items}
             onToggle={(id) => useGroceryStore.getState().togglePurchased(id)}
+            onToggleVisit={(id, date) => useGroceryStore.getState().toggleVisit(id, date)}
           />
         ))}
       </Page>

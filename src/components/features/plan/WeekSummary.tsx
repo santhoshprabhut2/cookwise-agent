@@ -3,8 +3,9 @@
 import { Flame, Recycle, Wallet } from "lucide-react";
 import { useMemo } from "react";
 import { Card, ProgressBar } from "@/components/ui";
+import { WEEKS_PER_MONTH } from "@/lib/engines/constants";
 import type { MealPlan, PantryItem, Recipe, UserProfile } from "@/lib/types";
-import { daysUntil, formatINR } from "@/lib/utils";
+import { cn, daysUntil, formatINR } from "@/lib/utils";
 
 /** Pantry stock counted as "expiring" for the coverage figure. */
 const EXPIRY_WINDOW_DAYS = 4;
@@ -20,6 +21,8 @@ export interface WeekTotals {
   kcalPerDay: number;
   targetKcal: number;
   cost: number;
+  /** The user's monthly budget spread over a week, or 0 when none is set. */
+  weeklyBudget: number;
   expiringCovered: number;
   expiringTotal: number;
   mealCount: number;
@@ -61,6 +64,7 @@ export function weekTotals(
     kcalPerDay: Math.round(kcal / 7),
     targetKcal: profile?.dailyCalorieTarget ?? 0,
     cost: Math.round(cost),
+    weeklyBudget: Math.round((profile?.budgetMonthly ?? 0) / WEEKS_PER_MONTH),
     expiringCovered: covered.size,
     expiringTotal: new Set(expiring.map((p) => p.ingredientId)).size,
     mealCount: counted.length,
@@ -77,6 +81,7 @@ export function WeekSummary({ plan, recipes, profile, pantry }: WeekSummaryProps
   const pct = totals.targetKcal
     ? Math.round((totals.kcalPerDay / totals.targetKcal) * 100)
     : 0;
+  const overBudget = totals.weeklyBudget > 0 && totals.cost > totals.weeklyBudget;
 
   return (
     <Card padding="md">
@@ -108,9 +113,20 @@ export function WeekSummary({ plan, recipes, profile, pantry }: WeekSummaryProps
             <Wallet size={13} aria-hidden="true" />
             <span className="text-[11px]">Food cost</span>
           </div>
-          <p className="mt-1 text-[16px] font-bold text-text">
+          <p
+            className={cn(
+              "mt-1 text-[16px] font-bold",
+              overBudget ? "text-orange-600" : "text-text",
+            )}
+          >
             {formatINR(totals.cost)}
           </p>
+          {totals.weeklyBudget > 0 && (
+            <p className={cn("text-[11px]", overBudget ? "text-orange-600" : "text-text-2")}>
+              {overBudget ? "over " : "of "}
+              {formatINR(totals.weeklyBudget)} a week
+            </p>
+          )}
         </div>
         <div className="rounded-xl bg-surface-2 p-3">
           <div className="flex items-center gap-1.5 text-text-2">

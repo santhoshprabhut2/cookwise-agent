@@ -35,6 +35,7 @@ import type {
   TempSample,
   TextureFeedback,
   TimeAvailability,
+  TimeSchedule,
   Unit,
 } from "@/lib/types";
 
@@ -76,6 +77,7 @@ export type ProfileRow = {
   currency: string;
   skill: SkillLevel;
   time_availability: TimeAvailability;
+  time_schedule: TimeSchedule | null;
   priorities: Priority[];
   servings_default: number;
   onboarding_complete: boolean;

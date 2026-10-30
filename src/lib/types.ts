@@ -63,6 +63,25 @@ export type Priority =
 
 export type TimeAvailability = "low" | "medium" | "high" | "varies";
 
+/**
+ * How much time the user has to cook one specific meal.
+ * very_little ≈ 10 min, little ≈ 20 min, some ≈ 30 min, plenty = no limit.
+ */
+export type SlotTime = "very_little" | "little" | "some" | "plenty";
+
+export type WeekdayKey = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
+
+/** The meals a weekly time schedule covers. */
+export type ScheduledMealType = "breakfast" | "lunch" | "dinner";
+
+/**
+ * Optional per-day, per-meal cooking time ("Thursday morning: very little").
+ * Any missing cell falls back to the single `timeAvailability` setting.
+ */
+export type TimeSchedule = Partial<
+  Record<WeekdayKey, Partial<Record<ScheduledMealType, SlotTime>>>
+>;
+
 /** 1 = no spice, 5 = very hot */
 export type SpiceLevel = 1 | 2 | 3 | 4 | 5;
 
@@ -96,6 +115,8 @@ export interface UserProfile {
 
   skill: SkillLevel;
   timeAvailability: TimeAvailability;
+  /** Per-day, per-meal override of `timeAvailability`. Stored as one jsonb column. */
+  timeSchedule?: TimeSchedule;
   /** Ordered, first = most important */
   priorities: Priority[];
   servingsDefault: number;
@@ -224,7 +245,13 @@ export type RecipeTag =
   | "comfort"
   | "one_pot"
   | "kid_friendly"
-  | "guest_friendly";
+  | "guest_friendly"
+  /** Long to cook but keeps and reheats well, so it can feed two meals. */
+  | "batch_friendly"
+  /** A whole plate: a main dish with the rice, chapati or other staple it is eaten with. */
+  | "complete_meal"
+  /** Rice, chapati and the like. Eaten with a main dish, so never planned on its own. */
+  | "staple";
 
 export interface RecipeIngredient {
   ingredientId: ID;
@@ -300,6 +327,12 @@ export interface PlannedMeal {
   locked: boolean;
   status: PlannedMealStatus;
   note?: string;
+  /**
+   * Set when this meal re-serves a dish cooked for another planned meal
+   * ("cook once, eat twice"). Points at the meal the dish is cooked for.
+   * Nothing is cooked for a leftover meal, only reheated.
+   */
+  leftoverOf?: ID;
 }
 
 export interface MealPlan {
@@ -312,6 +345,28 @@ export interface MealPlan {
   updatedAt: ISODateTime;
 }
 
+/** One shopping trip for a fresh, short-lived item. */
+export interface FreshBuyVisit {
+  date: ISODate;
+  grams: number;
+  /** In the item's own unit (pieces for `pcs`, otherwise grams or ml). */
+  quantity: number;
+  /** Ticked off on the shopping list. */
+  purchased?: boolean;
+  /** Already moved into the pantry. */
+  addedToPantry?: boolean;
+}
+
+/**
+ * Milk, meat and herbs spoil before a week is over, so they are bought in
+ * several small trips instead of one weekly shop.
+ */
+export interface FreshBuyPlan {
+  /** Buy again at least this often while the plan still needs it (1 = daily). */
+  everyDays: number;
+  visits: FreshBuyVisit[];
+}
+
 export interface GroceryItem {
   id: ID;
   listId: ID;
@@ -321,6 +376,10 @@ export interface GroceryItem {
   unit: Unit;
   grams: number;
   estimatedCost: number; // INR
+  /** INR of this item the plan actually uses up, before pack-size rounding. */
+  usedCost?: number;
+  /** Present for fresh items that should be bought in several trips. */
+  fresh?: FreshBuyPlan;
   purchased: boolean;
   addedToPantry: boolean;
 }

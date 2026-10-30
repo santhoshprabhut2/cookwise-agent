@@ -42,6 +42,7 @@ src/
     auth/                      Supabase email-OTP sign-in (only shown when Supabase configured)
     (tabs)/                    route group with BottomNav in its layout
       home/  plan/  cook/  pantry/  profile/
+      meals/  foods/           complete meals list; custom foods (list, new, [id])
     recipes/[id]/              recipe detail
     cook/[sessionId]/          cooking mode (verify → steps → retention → feedback)
     expiring/                  "Use expiring items"
@@ -221,6 +222,8 @@ Use `responseMimeType: "application/json"` + `responseSchema` for structured out
 | Grocery | `/plan/grocery` | 2, 11 |
 | Adapt | `/plan/adapt` | 5 |
 | Cook tab | `/cook` | 6 entry; today's meals; recommended; expiring |
+| Complete meals | `/meals` | 2, 6 (whole plates for lunch and dinner, filterable) |
+| My foods | `/foods`, `/foods/new`, `/foods/[id]` | 2, 6 (add a dish with ingredient weights; edit, delete) |
 | Recipe detail | `/recipes/[id]` | 6 |
 | Cooking mode | `/cook/[sessionId]` | 4, 6, 7 (verify ingredients → steps with live weight/temp → retention → feedback) |
 | Nutrient retention | `/cook/[sessionId]/retention` | 7 |

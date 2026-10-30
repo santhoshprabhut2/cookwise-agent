@@ -14,6 +14,9 @@ export const TAG_LABELS: Record<RecipeTag, string> = {
   one_pot: "One Pot",
   kid_friendly: "Kid Friendly",
   guest_friendly: "Guest Friendly",
+  batch_friendly: "Cook Once, Eat Twice",
+  complete_meal: "Complete Meal",
+  staple: "Staple",
 };
 
 export function tagLabel(tag: RecipeTag | undefined): string | undefined {

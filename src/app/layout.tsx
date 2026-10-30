@@ -1,7 +1,9 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import { AppProviders } from "@/components/providers/AppProviders";
+import { InstallPrompt } from "@/components/pwa/InstallPrompt";
 import { ServiceWorkerRegister } from "@/components/pwa/ServiceWorkerRegister";
+import { UpdateNotice } from "@/components/pwa/UpdateNotice";
 import "./globals.css";
 
 const inter = Inter({
@@ -26,7 +28,7 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: "/icons/icon-192.png",
-    apple: "/icons/icon-192.png",
+    apple: "/icons/apple-touch-icon.png",
   },
 };
 
@@ -45,6 +47,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <AppProviders>
           <div className="app-shell">{children}</div>
           <ServiceWorkerRegister />
+          {/* Mounted at the root so the install event, which fires once and
+              early, is captured on whichever page the user lands on. */}
+          <InstallPrompt />
+          <UpdateNotice />
         </AppProviders>
       </body>
     </html>

@@ -3,7 +3,9 @@
 import { Chip, Input, SegmentedControl, Stepper } from "@/components/ui";
 import type { SkillLevel, TimeAvailability } from "@/lib/types";
 import { formatINR } from "@/lib/utils";
+import { hasSchedule } from "@/lib/engines/schedule";
 import { BUDGET_PRESETS, SKILL_OPTIONS, TIME_OPTIONS } from "../options";
+import { TimeScheduleGrid } from "../TimeScheduleGrid";
 import { StepSection, numberOrUndefined, type StepProps } from "./common";
 
 /** Step 6 — monthly budget, cooking skill, time availability, default servings. */
@@ -63,6 +65,28 @@ export function StepBudget({ draft, onChange, errors }: StepProps) {
             value: o.value,
             label: o.value === "varies" ? "Varies" : o.label,
           }))}
+        />
+      </StepSection>
+
+      <StepSection
+        title="Your week"
+        hint="Mornings rushed, evenings free? Tap a meal to say how long you really have. The planner never picks a dish that takes longer, and a long dish cooked once becomes a quick reheat at a rushed meal."
+        action={
+          hasSchedule(draft.timeSchedule) ? (
+            <button
+              type="button"
+              className="text-xs font-semibold text-primary"
+              onClick={() => onChange({ timeSchedule: undefined })}
+            >
+              Reset
+            </button>
+          ) : undefined
+        }
+      >
+        <TimeScheduleGrid
+          value={draft.timeSchedule}
+          availability={time}
+          onChange={(next) => onChange({ timeSchedule: next })}
         />
       </StepSection>
 

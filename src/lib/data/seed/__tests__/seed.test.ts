@@ -78,7 +78,7 @@ const EQUIPMENT: Equipment[] = [
 ];
 const TAGS: RecipeTag[] = [
   "high_protein", "quick", "low_cal", "high_fiber", "budget", "comfort",
-  "one_pot", "kid_friendly", "guest_friendly",
+  "one_pot", "kid_friendly", "guest_friendly", "batch_friendly", "complete_meal", "staple",
 ];
 const METHODS: CookingMethod[] = [
   "raw", "boil", "steam", "saute", "stir_fry", "shallow_fry", "deep_fry",
@@ -271,8 +271,10 @@ describe("recipe catalog", () => {
 
   it("has 4-8 steps numbered 1..n with unique ids", () => {
     for (const r of RECIPES) {
+      // A complete meal has the steps of every dish on the plate.
+      const most = r.tags.includes("complete_meal") ? 20 : 8;
       expect(r.steps.length, r.id).toBeGreaterThanOrEqual(4);
-      expect(r.steps.length, r.id).toBeLessThanOrEqual(8);
+      expect(r.steps.length, r.id).toBeLessThanOrEqual(most);
       r.steps.forEach((s, idx) => {
         expect(s.order, `${r.id} step ${idx}`).toBe(idx + 1);
         expect(s.id, `${r.id} step ${idx}`).toBe(`${r.id}-s${idx + 1}`);

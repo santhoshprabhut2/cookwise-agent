@@ -82,6 +82,23 @@ export function todaysMeals(
     .sort((a, b) => mealRank(a.mealType) - mealRank(b.mealType));
 }
 
+/** Leftover meals that re-serve the dish cooked for `mealId`. */
+export function leftoversOf(plan: MealPlan | undefined, mealId: ID): PlannedMeal[] {
+  if (!plan) return [];
+  return plan.meals.filter((m) => m.leftoverOf === mealId);
+}
+
+/**
+ * How many servings to cook for `meal`: its own plus every leftover meal still
+ * waiting to be eaten, because that dish is cooked once for all of them.
+ */
+export function cookServingsFor(plan: MealPlan | undefined, meal: PlannedMeal): number {
+  const extra = leftoversOf(plan, meal.id)
+    .filter((m) => m.status === "planned")
+    .reduce((sum, m) => sum + m.servings, 0);
+  return meal.servings + extra;
+}
+
 /** Last hour of the day a meal slot is still "next". */
 const SLOT_END_HOUR: Record<MealType, number> = {
   breakfast: 11,

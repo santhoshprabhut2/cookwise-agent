@@ -24,6 +24,7 @@ import {
   PACK_SIZE_G,
   PACK_SIZE_OVERRIDE_G,
 } from "./constants";
+import { freshBuyEveryDays, planFreshVisits } from "./freshness";
 import { ceilTo, round } from "./helpers";
 import { gramsOf, indexIngredients } from "./nutrition";
 
@@ -47,12 +48,12 @@ interface Lot {
 
 /**
  * Consume `requirements` (in date order) from `lots` (FIFO by expiry) and
- * return the grams that could not be covered.
+ * return what could not be covered, still tagged with the day it is needed.
  *
  * A lot only counts for a requirement whose meal date is on or before the
  * lot's expiry — food that goes off on Tuesday cannot feed Thursday's dinner.
  */
-export function shortfall(requirements: Requirement[], lots: Lot[]): number {
+export function uncoveredNeeds(requirements: Requirement[], lots: Lot[]): Requirement[] {
   const stock = lots
     .map((l) => ({ ...l }))
     .sort((a, b) => (a.expiresAt < b.expiresAt ? -1 : a.expiresAt > b.expiresAt ? 1 : 0));
@@ -60,7 +61,7 @@ export function shortfall(requirements: Requirement[], lots: Lot[]): number {
     a.date < b.date ? -1 : a.date > b.date ? 1 : 0,
   );
 
-  let missing = 0;
+  const uncovered: Requirement[] = [];
   for (const need of needs) {
     let left = need.grams;
     for (const lot of stock) {
@@ -71,9 +72,14 @@ export function shortfall(requirements: Requirement[], lots: Lot[]): number {
       lot.grams -= take;
       left -= take;
     }
-    if (left > 0) missing += left;
+    if (left > 0) uncovered.push({ date: need.date, grams: left });
   }
-  return missing;
+  return uncovered;
+}
+
+/** Total grams that could not be covered from the pantry. */
+export function shortfall(requirements: Requirement[], lots: Lot[]): number {
+  return uncoveredNeeds(requirements, lots).reduce((sum, n) => sum + n.grams, 0);
 }
 
 export function buildGroceryList(
@@ -90,16 +96,29 @@ export function buildGroceryList(
   // 1. Requirements per ingredient, tagged with the date they are needed.
   const requirements = new Map<ID, Requirement[]>();
   const displayName = new Map<ID, string>();
+  const mealById = new Map((plan.meals ?? []).map((m) => [m.id, m]));
   for (const meal of plan.meals ?? []) {
     if (meal.status !== "planned") continue;
     const recipe = recipeById.get(meal.recipeId);
     if (!recipe) continue;
+
+    // A leftover is cooked together with its source meal: the ingredients are
+    // needed on the day that dish is cooked, and not at all once it already was.
+    let needDate = meal.date;
+    if (meal.leftoverOf) {
+      const source = mealById.get(meal.leftoverOf);
+      if (source) {
+        if (source.status !== "planned") continue;
+        needDate = source.date;
+      }
+    }
+
     const scale = meal.servings / Math.max(1, recipe.servings || 1);
     for (const ri of recipe.ingredients ?? []) {
       const grams = ri.grams * scale;
       if (grams <= 0) continue;
       const list = requirements.get(ri.ingredientId) ?? [];
-      list.push({ date: meal.date, grams });
+      list.push({ date: needDate, grams });
       requirements.set(ri.ingredientId, list);
       if (!displayName.has(ri.ingredientId)) displayName.set(ri.ingredientId, ri.name);
     }
@@ -118,12 +137,37 @@ export function buildGroceryList(
   // 3. Shortfall → pack sizes → cost.
   const items: GroceryItem[] = [];
   for (const [ingredientId, needs] of requirements) {
-    const missing = shortfall(needs, lots.get(ingredientId) ?? []);
+    const uncovered = uncoveredNeeds(needs, lots.get(ingredientId) ?? []);
+    const missing = uncovered.reduce((sum, n) => sum + n.grams, 0);
     if (missing <= 0.001) continue;
 
     const ingredient = catalog.get(ingredientId);
     const name = ingredient?.name ?? displayName.get(ingredientId) ?? ingredientId;
     const unit: Unit = ingredient?.defaultUnit ?? "g";
+    const usedCost = round((missing / 1000) * (ingredient?.costPerKg ?? 0), 2);
+
+    // Milk, meat, fish and herbs spoil within days: buy them in small trips.
+    const everyDays = freshBuyEveryDays(ingredient);
+    if (everyDays !== undefined) {
+      const visits = planFreshVisits(uncovered, everyDays, ingredient);
+      const grams = visits.reduce((sum, v) => sum + v.grams, 0);
+      const quantity = visits.reduce((sum, v) => sum + v.quantity, 0);
+      items.push({
+        id: uid(),
+        listId,
+        ingredientId,
+        name,
+        quantity: round(quantity, 2),
+        unit,
+        grams: round(grams, 2),
+        estimatedCost: round((grams / 1000) * (ingredient?.costPerKg ?? 0), 2),
+        usedCost,
+        fresh: { everyDays, visits },
+        purchased: false,
+        addedToPantry: false,
+      });
+      continue;
+    }
 
     let grams: number;
     let quantity: number;
@@ -146,6 +190,7 @@ export function buildGroceryList(
       unit,
       grams: round(grams, 2),
       estimatedCost: round((grams / 1000) * (ingredient?.costPerKg ?? 0), 2),
+      usedCost,
       purchased: false,
       addedToPantry: false,
     });
@@ -163,11 +208,33 @@ export function buildGroceryList(
   };
 }
 
+/**
+ * How many purchases are ticked off but not yet in the pantry. An item bought in
+ * several trips counts once per ticked trip, an ordinary item counts once.
+ */
+export function pendingPantryCount(list: GroceryList): number {
+  let n = 0;
+  for (const item of list.items ?? []) {
+    if (item.fresh) {
+      n += item.fresh.visits.filter((v) => v.purchased && !v.addedToPantry).length;
+    } else if (item.purchased && !item.addedToPantry) {
+      n += 1;
+    }
+  }
+  return n;
+}
+
 export interface GroceryTotals {
   itemCount: number;
   purchasedCount: number;
   totalGrams: number;
   estimatedCost: number;
+  /**
+   * Rupees of the list this week's meals actually use up. It is lower than
+   * `estimatedCost` because shopping rounds up to whole packs of rice, oil and
+   * spices that keep for later weeks.
+   */
+  usedCost: number;
   purchasedCost: number;
   remainingCost: number;
 }
@@ -175,11 +242,13 @@ export interface GroceryTotals {
 export function groceryTotals(list: GroceryList): GroceryTotals {
   let totalGrams = 0;
   let estimatedCost = 0;
+  let usedCost = 0;
   let purchasedCost = 0;
   let purchasedCount = 0;
   for (const item of list.items ?? []) {
     totalGrams += item.grams;
     estimatedCost += item.estimatedCost;
+    usedCost += item.usedCost ?? item.estimatedCost;
     if (item.purchased) {
       purchasedCount += 1;
       purchasedCost += item.estimatedCost;
@@ -190,6 +259,7 @@ export function groceryTotals(list: GroceryList): GroceryTotals {
     purchasedCount,
     totalGrams: round(totalGrams, 2),
     estimatedCost: round(estimatedCost, 2),
+    usedCost: round(usedCost, 2),
     purchasedCost: round(purchasedCost, 2),
     remainingCost: round(estimatedCost - purchasedCost, 2),
   };

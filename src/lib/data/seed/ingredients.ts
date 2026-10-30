@@ -1,7 +1,7 @@
 import type { Ingredient } from "@/lib/types";
 
 /**
- * Ingredient catalog (75 entries).
+ * Ingredient catalog (77 entries).
  *
  * Nutrition is per 100 g of the raw, edible portion (per 100 ml for milk and
  * oils) and follows IFCT 2017 / USDA SR-28 typical values. Costs are Chennai
@@ -1688,6 +1688,56 @@ export const INGREDIENTS: Ingredient[] = [
       potassiumMg: 270,
     },
     aliases: ["makkacholam", "bhutta", "corn"],
+  },
+  {
+    id: "broccoli",
+    name: "Broccoli",
+    category: "vegetables",
+    emoji: "🥦",
+    defaultUnit: "g",
+    shelfLifeDays: 5,
+    storage: "fridge",
+    costPerKg: 140,
+    nutrition: {
+      kcal: 34,
+      proteinG: 2.8,
+      carbsG: 6.6,
+      fatG: 0.4,
+      fiberG: 2.6,
+      vitaminCMg: 89.2,
+      vitaminB6Mg: 0.18,
+      folateUg: 63,
+      vitaminAUg: 31,
+      ironMg: 0.7,
+      calciumMg: 47,
+      potassiumMg: 316,
+    },
+    aliases: ["broccoli florets", "hari gobi"],
+  },
+  {
+    id: "sweet-potato",
+    name: "Sweet Potato",
+    category: "vegetables",
+    emoji: "🍠",
+    defaultUnit: "g",
+    shelfLifeDays: 14,
+    storage: "pantry",
+    costPerKg: 60,
+    nutrition: {
+      kcal: 86,
+      proteinG: 1.6,
+      carbsG: 20.1,
+      fatG: 0.1,
+      fiberG: 3,
+      vitaminCMg: 2.4,
+      vitaminB6Mg: 0.21,
+      folateUg: 11,
+      vitaminAUg: 709,
+      ironMg: 0.6,
+      calciumMg: 30,
+      potassiumMg: 337,
+    },
+    aliases: ["sweet potato", "shakarkandi", "sakkaravalli kizhangu"],
   },
 ];
 

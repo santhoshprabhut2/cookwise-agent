@@ -2,7 +2,13 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { adaptPlan, generateWeekPlan, type PlannerContext } from "@/lib/engines/planner";
+import { sanitizeLeftovers } from "@/lib/engines/leftovers";
+import {
+  adaptPlan,
+  fitMealsToSchedule,
+  generateWeekPlan,
+  type PlannerContext,
+} from "@/lib/engines/planner";
 import type {
   ID,
   ISODate,
@@ -111,7 +117,32 @@ function plannerContext(profile: UserProfile): PlannerContext {
     recipes: useRecipeStore.getState().recipes,
     pantry: usePantryStore.getState().items,
     preferences: usePreferenceStore.getState().model,
+    ingredients: INGREDIENTS,
+    today: toISODate(),
   };
+}
+
+/**
+ * After an edit, cut any leftover link the edit broke. A leftover whose source
+ * dish changed is now a meal that has to be cooked, so one that no longer fits
+ * its slot's time limit is given a dish that does.
+ */
+function settleLeftovers(plan: MealPlan, before: PlannedMeal[]): MealPlan {
+  const meals = sanitizeLeftovers(plan.meals);
+  if (meals === plan.meals) return plan;
+
+  const wereLeftovers = new Set(before.filter((m) => m.leftoverOf).map((m) => m.id));
+  const orphaned = meals
+    .filter((m) => wereLeftovers.has(m.id) && !m.leftoverOf)
+    .map((m) => m.id);
+  const cleaned: MealPlan = { ...plan, meals };
+  if (orphaned.length === 0) return cleaned;
+  try {
+    return fitMealsToSchedule(cleaned, orphaned, plannerContext(currentProfile()));
+  } catch (err) {
+    console.warn("[cookwise/plan] could not re-fit orphaned leftovers", err);
+    return cleaned;
+  }
 }
 
 /** Compact recipe summary sent to the AI route (keeps the payload small). */
@@ -229,6 +260,16 @@ export const usePlanStore = create<PlanState>()(
               createdAt: ts,
               updatedAt: ts,
             };
+            // The model was asked to respect the weekly time limits; make sure it did.
+            try {
+              plan = fitMealsToSchedule(
+                plan,
+                plan.meals.map((m) => m.id),
+                plannerContext(profile),
+              );
+            } catch (err) {
+              console.warn("[cookwise/plan] could not check the AI plan against the schedule", err);
+            }
           }
         }
         if (!plan) {
@@ -247,7 +288,11 @@ export const usePlanStore = create<PlanState>()(
           weekStart,
           createdAt: existing?.createdAt ?? plan.createdAt ?? nowIso(),
           updatedAt: nowIso(),
-          meals: normaliseMeals(mergeLocked(plan.meals, lockedMeals), id),
+          // Locked meals keep their ids but everything else is new, so a locked
+          // leftover can be left pointing at a meal that no longer exists.
+          meals: sanitizeLeftovers(
+            normaliseMeals(mergeLocked(plan.meals, lockedMeals), id),
+          ),
         };
 
         set({
@@ -281,15 +326,20 @@ export const usePlanStore = create<PlanState>()(
         set({
           plans: get().plans.map((p) =>
             p.meals.some((m) => m.id === mealId)
-              ? {
-                  ...p,
-                  updatedAt: ts,
-                  meals: p.meals.map((m) =>
-                    m.id === mealId
-                      ? { ...m, ...patch, id: m.id, planId: m.planId }
-                      : m,
-                  ),
-                }
+              ? // Swapping a dish, or removing the one a leftover was made from,
+                // must not leave a leftover pointing at the wrong meal.
+                settleLeftovers(
+                  {
+                    ...p,
+                    updatedAt: ts,
+                    meals: p.meals.map((m) =>
+                      m.id === mealId
+                        ? { ...m, ...patch, id: m.id, planId: m.planId }
+                        : m,
+                    ),
+                  },
+                  p.meals,
+                )
               : p,
           ),
         });
@@ -327,11 +377,14 @@ export const usePlanStore = create<PlanState>()(
         set({
           plans: get().plans.map((p) =>
             p.meals.some((m) => m.id === mealId)
-              ? {
-                  ...p,
-                  updatedAt: ts,
-                  meals: p.meals.filter((m) => m.id !== mealId),
-                }
+              ? settleLeftovers(
+                  {
+                    ...p,
+                    updatedAt: ts,
+                    meals: p.meals.filter((m) => m.id !== mealId),
+                  },
+                  p.meals,
+                )
               : p,
           ),
         });
@@ -368,7 +421,7 @@ export const usePlanStore = create<PlanState>()(
           weekStart,
           createdAt: base.createdAt,
           updatedAt: nowIso(),
-          meals: normaliseMeals(adapted.meals, base.id),
+          meals: sanitizeLeftovers(normaliseMeals(adapted.meals, base.id)),
         };
 
         set({

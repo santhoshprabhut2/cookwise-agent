@@ -11,10 +11,13 @@ import type {
   Equipment,
   Goal,
   Priority,
+  ScheduledMealType,
   SkillLevel,
+  SlotTime,
   SpiceLevel,
   TimeAvailability,
   UserProfile,
+  WeekdayKey,
 } from "@/lib/types";
 import { humanize } from "@/lib/utils";
 
@@ -142,6 +145,33 @@ export const TIME_OPTIONS: Option<TimeAvailability>[] = [
   { value: "high", label: "High", description: "Happy to cook longer" },
   { value: "varies", label: "Varies by day", description: "Some days rushed, some not" },
 ];
+
+/** Weekly grid: what each level means, in words and on the cell. */
+export const SLOT_TIME_LABELS: Record<
+  SlotTime,
+  { cell: string; words: string; minutes: string }
+> = {
+  very_little: { cell: "10 min", words: "Very little time", minutes: "about 10 minutes" },
+  little: { cell: "20 min", words: "Little time", minutes: "about 20 minutes" },
+  some: { cell: "30 min", words: "Some time", minutes: "about 30 minutes" },
+  plenty: { cell: "Free", words: "Plenty of time", minutes: "no limit" },
+};
+
+export const WEEKDAY_LABELS: Record<WeekdayKey, { short: string; long: string }> = {
+  mon: { short: "Mon", long: "Monday" },
+  tue: { short: "Tue", long: "Tuesday" },
+  wed: { short: "Wed", long: "Wednesday" },
+  thu: { short: "Thu", long: "Thursday" },
+  fri: { short: "Fri", long: "Friday" },
+  sat: { short: "Sat", long: "Saturday" },
+  sun: { short: "Sun", long: "Sunday" },
+};
+
+export const SCHEDULED_MEAL_LABELS: Record<ScheduledMealType, string> = {
+  breakfast: "Morning",
+  lunch: "Afternoon",
+  dinner: "Evening",
+};
 
 // ---------------------------------------------------------------------------
 // Step 7 — Priorities
