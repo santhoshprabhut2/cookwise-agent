@@ -9,29 +9,64 @@
  *
  * Bump CACHE_VERSION whenever the precache list or a strategy changes; the
  * activate handler deletes every cache that does not match the current names.
+ *
+ * The same file runs on a server (app at "/") and on GitHub Pages (app at
+ * "/cookwise-agent/", pages served as folders). Everything below is relative
+ * to the worker's own scope, so it needs no per-host edit.
  */
 
-const CACHE_VERSION = "v1";
-const PRECACHE = `cookwise-precache-${CACHE_VERSION}`;
-const RUNTIME = `cookwise-runtime-${CACHE_VERSION}`;
+const CACHE_VERSION = "v2";
+
+// Filled in by scripts/build-pages.mjs. On the Pages build BUILD_ASSETS lists every
+// file under _next/static (all the page scripts, styles and fonts), so every screen
+// works offline from the first visit, and BUILD_ID changes with each deploy so the
+// previous deploy's files are deleted. A server build leaves both as they are.
+const BUILD_ID = "dev";
+const BUILD_ASSETS = [/*BUILD_ASSETS*/];
+
+const PRECACHE = `cookwise-precache-${CACHE_VERSION}-${BUILD_ID}`;
+const RUNTIME = `cookwise-runtime-${CACHE_VERSION}-${BUILD_ID}`;
 const CURRENT_CACHES = [PRECACHE, RUNTIME];
 
-const OFFLINE_URL = "/offline.html";
+// The worker file sits at the app root, so its scope is the base path.
+const BASE = new URL(self.registration.scope).pathname.replace(/\/$/, "");
+// A static host serves pages as folders ("/home/"); a server as "/home". The
+// page registers the worker with ?slash=1 when it is the static build.
+const SLASH = new URL(self.location.href).searchParams.get("slash") === "1" ? "/" : "";
+const at = (path) => BASE + path;
+const page = (path) => (path === "/" ? at("/") : at(path) + SLASH);
+
+const OFFLINE_URL = at("/offline.html");
 
 const PRECACHE_URLS = [
-  "/",
-  "/home",
-  "/plan",
-  "/cook",
-  "/pantry",
-  "/profile",
+  page("/"),
+  page("/home"),
+  page("/plan"),
+  page("/plan/grocery"),
+  page("/plan/adapt"),
+  page("/cook"),
+  page("/cook/session"),
+  page("/cook/session/retention"),
+  page("/cook/session/feedback"),
+  page("/meals"),
+  page("/foods"),
+  page("/foods/new"),
+  page("/foods/edit"),
+  page("/recipes/view"),
+  page("/pantry"),
+  page("/pantry/add"),
+  page("/expiring"),
+  page("/profile"),
+  page("/profile/edit"),
+  page("/onboarding"),
   OFFLINE_URL,
-  "/manifest.webmanifest",
-  "/icons/icon.svg",
-  "/icons/icon-192.png",
-  "/icons/icon-512.png",
-  "/icons/maskable-512.png",
-  "/icons/apple-touch-icon.png",
+  at("/manifest.webmanifest"),
+  at("/icons/icon.svg"),
+  at("/icons/icon-192.png"),
+  at("/icons/icon-512.png"),
+  at("/icons/maskable-512.png"),
+  at("/icons/apple-touch-icon.png"),
+  ...BUILD_ASSETS.map(at),
 ];
 
 // ---------------------------------------------------------------------------
@@ -48,7 +83,8 @@ self.addEventListener("install", (event) => {
         PRECACHE_URLS.map(async (url) => {
           try {
             const response = await fetch(url, { cache: "reload" });
-            if (response.ok) await cache.put(url, response);
+            // A redirected response cannot be served to a navigation.
+            if (response.ok && !response.redirected) await cache.put(url, response);
           } catch {
             /* offline during install — the runtime handler will fill this in */
           }
@@ -67,8 +103,11 @@ self.addEventListener("activate", (event) => {
           .filter((name) => name.startsWith("cookwise-") && !CURRENT_CACHES.includes(name))
           .map((name) => caches.delete(name)),
       );
+      // Navigation preload would race the network against our own handler, and
+      // when the network is down it can hand back an error that hides the cached
+      // page. A registration remembers the setting, so turn it off explicitly.
       if (self.registration.navigationPreload) {
-        await self.registration.navigationPreload.enable();
+        await self.registration.navigationPreload.disable();
       }
       await self.clients.claim();
     })(),
@@ -86,8 +125,8 @@ self.addEventListener("message", (event) => {
 // ---------------------------------------------------------------------------
 
 function isStaleWhileRevalidate(url, request) {
-  if (url.pathname.startsWith("/_next/static/")) return true;
-  if (url.pathname.startsWith("/icons/")) return true;
+  if (url.pathname.startsWith(at("/_next/static/"))) return true;
+  if (url.pathname.startsWith(at("/icons/"))) return true;
   if (url.origin === "https://fonts.gstatic.com") return true;
   if (url.origin === "https://fonts.googleapis.com") return true;
   return request.destination === "image" || request.destination === "font";
@@ -97,20 +136,16 @@ function isStaleWhileRevalidate(url, request) {
 async function handleNavigation(event) {
   const { request } = event;
   try {
-    const preloaded = await event.preloadResponse;
-    if (preloaded) {
-      void putInCache(RUNTIME, request, preloaded.clone());
-      return preloaded;
-    }
-
     const response = await fetch(request);
     if (response && response.ok) {
       void putInCache(RUNTIME, request, response.clone());
     }
     return response;
   } catch {
+    // Every ?id= variant of a screen is the same page shell, so any cached copy will do.
     const cached =
       (await caches.match(request)) ??
+      (await caches.match(request, { ignoreSearch: true })) ??
       (await caches.match(new URL(request.url).pathname));
     if (cached) return cached;
 
@@ -145,6 +180,21 @@ function staleWhileRevalidate(event) {
         (response) => response ?? new Response("", { status: 504, statusText: "Offline" }),
       ),
   );
+}
+
+/**
+ * Network-first for page data (`?_rsc=` payloads), so a new deploy is never
+ * hidden behind an old copy. Falls back to the cache when offline.
+ */
+async function networkFirst(request) {
+  try {
+    const response = await fetch(request);
+    if (response && response.ok) void putInCache(RUNTIME, request, response.clone());
+    return response;
+  } catch {
+    const cached = await caches.match(request);
+    return cached ?? new Response("", { status: 504, statusText: "Offline" });
+  }
 }
 
 /** Cache-first for anything else we have already stored. */
@@ -182,12 +232,12 @@ self.addEventListener("fetch", (event) => {
 
   // Never cache API traffic — AI routes, auth callbacks and the ML proxy must
   // always hit the network so their fallbacks can fire correctly.
-  if (url.origin === self.location.origin && url.pathname.startsWith("/api/")) {
+  if (url.origin === self.location.origin && url.pathname.startsWith(at("/api/"))) {
     return;
   }
 
   // Skip Next.js dev/HMR endpoints and range requests.
-  if (url.pathname.startsWith("/_next/webpack-hmr")) return;
+  if (url.pathname.startsWith(at("/_next/webpack-hmr"))) return;
   if (request.headers.has("range")) return;
 
   if (request.mode === "navigate") {
@@ -202,6 +252,11 @@ self.addEventListener("fetch", (event) => {
 
   if (isStaleWhileRevalidate(url, request)) {
     event.respondWith(staleWhileRevalidate(event));
+    return;
+  }
+
+  if (url.searchParams.has("_rsc")) {
+    event.respondWith(networkFirst(request));
     return;
   }
 

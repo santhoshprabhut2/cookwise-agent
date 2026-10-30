@@ -1,4 +1,8 @@
 import type { MetadataRoute } from "next";
+import { BASE_PATH, pagePath, withBasePath } from "@/lib/base-path";
+
+// A static export needs to know this route never reads the request.
+export const dynamic = "force-static";
 
 /**
  * Served at /manifest.webmanifest (referenced from the root layout metadata).
@@ -13,9 +17,9 @@ export default function manifest(): MetadataRoute.Manifest {
     short_name: "Cookwise",
     description:
       "Cook smarter, live healthier. Plan meals, track your pantry, cook with live measurements and see exactly how much nutrition survives the pan.",
-    id: "/",
-    start_url: "/home",
-    scope: "/",
+    id: pagePath("/"),
+    start_url: pagePath("/home"),
+    scope: `${BASE_PATH}/`,
     display: "standalone",
     orientation: "portrait",
     background_color: "#f6f7f4",
@@ -25,25 +29,25 @@ export default function manifest(): MetadataRoute.Manifest {
     dir: "ltr",
     icons: [
       {
-        src: "/icons/icon.svg",
+        src: withBasePath("/icons/icon.svg"),
         sizes: "any",
         type: "image/svg+xml",
         purpose: "any",
       },
       {
-        src: "/icons/icon-192.png",
+        src: withBasePath("/icons/icon-192.png"),
         sizes: "192x192",
         type: "image/png",
         purpose: "any",
       },
       {
-        src: "/icons/icon-512.png",
+        src: withBasePath("/icons/icon-512.png"),
         sizes: "512x512",
         type: "image/png",
         purpose: "any",
       },
       {
-        src: "/icons/maskable-512.png",
+        src: withBasePath("/icons/maskable-512.png"),
         sizes: "512x512",
         type: "image/png",
         purpose: "maskable",
@@ -53,20 +57,20 @@ export default function manifest(): MetadataRoute.Manifest {
       {
         name: "Today's plan",
         short_name: "Plan",
-        url: "/plan",
-        icons: [{ src: "/icons/icon-192.png", sizes: "192x192" }],
+        url: pagePath("/plan"),
+        icons: [{ src: withBasePath("/icons/icon-192.png"), sizes: "192x192" }],
       },
       {
         name: "Start cooking",
         short_name: "Cook",
-        url: "/cook",
-        icons: [{ src: "/icons/icon-192.png", sizes: "192x192" }],
+        url: pagePath("/cook"),
+        icons: [{ src: withBasePath("/icons/icon-192.png"), sizes: "192x192" }],
       },
       {
         name: "Pantry",
         short_name: "Pantry",
-        url: "/pantry",
-        icons: [{ src: "/icons/icon-192.png", sizes: "192x192" }],
+        url: pagePath("/pantry"),
+        icons: [{ src: withBasePath("/icons/icon-192.png"), sizes: "192x192" }],
       },
     ],
   };

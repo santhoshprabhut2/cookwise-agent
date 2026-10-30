@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect } from "react";
+import { BASE_PATH, STATIC_EXPORT, withBasePath } from "@/lib/base-path";
 
 /**
- * Registers `/sw.js` in production only (a service worker in `next dev` caches
+ * Registers `/sw.js` (under the base path on GitHub Pages) in production only (a service worker in `next dev` caches
  * stale chunks and makes HMR miserable).
  *
  * When a new worker finishes installing it fires a `cw:sw-updated` window
@@ -53,7 +54,11 @@ export function ServiceWorkerRegister() {
     };
 
     navigator.serviceWorker
-      .register("/sw.js", { scope: "/" })
+      // On a static host the worker also needs to know pages are folders, so
+      // it is told through the query string (it cannot read build settings).
+      .register(`${withBasePath("/sw.js")}${STATIC_EXPORT ? "?slash=1" : ""}`, {
+        scope: `${BASE_PATH}/`,
+      })
       .then((reg) => {
         if (cancelled) return;
         registration = reg;

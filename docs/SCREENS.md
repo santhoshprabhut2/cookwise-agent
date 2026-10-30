@@ -39,7 +39,7 @@ do not draw them. Use tokens from `globals.css`. Component names refer to `src/c
   caption "Ready to cook something amazing?". Right: bell icon button with a red dot when there are expiring items.
 - **Today's Meal card**: label "Today's Meal", chip "High Protein" (first tag), 22px bold recipe name,
   emoji/image tile on the right (88×88, rounded-xl) with a 36px green circular arrow button overlapping its corner.
-  Below: 3 StatPills: `Clock` 20 min · `Flame` 320 kcal · `Dumbbell` 24g protein. Tap → `/recipes/[id]`.
+  Below: 3 StatPills: `Clock` 20 min · `Flame` 320 kcal · `Dumbbell` 24g protein. Tap → `/recipes/view?id=`.
   Picks the next uncooked meal today (breakfast → lunch → dinner) from the current plan.
 - **Quick actions** 4-column grid of white tiles (icon square 40px tinted + 2-line 11px label):
   Scan Ingredients (orange, `Camera`) → `/pantry/add?mode=scan`; View Meal Plan (blue, `CalendarDays`) → `/plan`;
@@ -77,15 +77,15 @@ do not draw them. Use tokens from `globals.css`. Component names refer to `src/c
   (compact banner → `/expiring`), **Recommended for you** (learning engine), **All recipes** with search + chips
   (All, Breakfast, Lunch, Dinner, Quick, High protein).
 
-## 8. Recipe detail — `/recipes/[id]`
+## 8. Recipe detail — `/recipes/view?id=` (ids moved from the path to the query so the site can be a static export, see PAGES.md)
 - Hero 240px: image or gradient+emoji; back and heart buttons (40px white circles) overlaid; chip "High Protein" bottom-left.
 - Content card overlapping the hero (rounded-t-3xl): 24px bold title, caption, 3 StatPills.
 - "Nutrition (per serving)" 4 tiles: 24g Protein · 12g Carbs · 18g Fats · 5g Fiber.
 - "Ingredients (2 servings)" with a servings stepper; right: soft green button **Add to Pantry** (adds missing items to grocery list).
   Rows: emoji tile, name, "4 pcs (200 g)", trailing check circle green when the pantry has enough (`totalGrams ≥ grams`).
-- Steps preview (collapsed list). Sticky bottom primary **Start Cooking →** → `useCookStore.start` → `/cook/[sessionId]`.
+- Steps preview (collapsed list). Sticky bottom primary **Start Cooking →** → `useCookStore.start` → `/cook/session?id=`.
 
-## 9. Cooking Mode — `/cook/[sessionId]`
+## 9. Cooking Mode — `/cook/session?id=`
 Phase A — **Verify ingredients** (one card per ingredient): "Place Eggs on the dock", live weight readout
 (48px bold "100.2 g" pulsing while unstable), target "200 g", tolerance ±10 %; camera button → `/api/ai/identify`
 (shows "Identified: Onion 94 %"); **Confirm** logs an `IngredientLog`. Skip → manual entry. Progress "3 of 4 verified".
@@ -96,10 +96,10 @@ top-left, big weight "100.2 g" bottom-left, green check circle bottom-right) and
 (flame icon, "Medium (140°C)", chip "Good range" / orange "Too hot") and a green-tinted note
 "Keep temperature between 120°C – 150°C for better nutrient retention." (from `liveRetentionHint`).
 If `durationSec`: timer ring with Start/Pause. Footer: outline **← Back** + primary **Next →**;
-last step → **Finish cooking** → `complete()` → `/cook/[sessionId]/retention`.
+last step → **Finish cooking** → `complete()` → `/cook/session/retention?id=`.
 A simulator control (small "Dock: simulate" sheet) lets the user add weight / change burner level for demos.
 
-## 10. Nutrient Retention — `/cook/[sessionId]/retention`
+## 10. Nutrient Retention — `/cook/session/retention?id=`
 - Header back, "Nutrient Retention".
 - Card **Cooking Impact**: green icon tile, caption "Estimated nutrient retention based on your cooking method, temperature and time."
 - Rows: label left, percent right (orange when < 60 %), ProgressBar, caption note. Order: Vitamin C, Vitamin B6, Folate,
@@ -107,7 +107,7 @@ A simulator control (small "Dock: simulate" sheet) lets the user add weight / ch
 - Warnings list (orange tint) then **Tip** card (leaf icon) "Cooking at medium heat helps retain more vitamins. Avoid overcooking."
 - Bottom primary **Rate this meal →** → feedback.
 
-## 11. Feedback — `/cook/[sessionId]/feedback`
+## 11. Feedback — `/cook/session/feedback?id=`
 - Header "How was it?" with recipe emoji. Overall 5-star; Taste 5-star; Spice segmented (Too mild / Just right / Too hot);
   Texture segmented; Quantity segmented; Notes textarea. Primary **Save feedback** → learning engine → toast
   "Thanks! We'll adjust your future plans." → `/home`.

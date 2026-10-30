@@ -11,6 +11,7 @@ const eslintConfig = defineConfig([
     ".next/**",
     ".next-*/**",
     "out/**",
+    ".pages/**",
     "build/**",
     "next-env.d.ts",
     // Not part of the Next.js app.

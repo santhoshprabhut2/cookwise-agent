@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import { AppProviders } from "@/components/providers/AppProviders";
+import { withBasePath } from "@/lib/base-path";
 import { InstallPrompt } from "@/components/pwa/InstallPrompt";
 import { ServiceWorkerRegister } from "@/components/pwa/ServiceWorkerRegister";
 import { UpdateNotice } from "@/components/pwa/UpdateNotice";
@@ -20,15 +21,15 @@ export const metadata: Metadata = {
   description:
     "Cook smarter, live healthier. Your personal cooking companion that measures, guides and adapts.",
   applicationName: "Cookwise",
-  manifest: "/manifest.webmanifest",
+  manifest: withBasePath("/manifest.webmanifest"),
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
     title: "Cookwise",
   },
   icons: {
-    icon: "/icons/icon-192.png",
-    apple: "/icons/apple-touch-icon.png",
+    icon: withBasePath("/icons/icon-192.png"),
+    apple: withBasePath("/icons/apple-touch-icon.png"),
   },
 };
 

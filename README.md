@@ -29,10 +29,10 @@ Python service are each optional upgrades.
 | 3 | Pantry with expiry tracking and automatic deduction after cooking | `/pantry` |
 | 4 | Automatic ingredient logging — camera identification and a live weight/temperature dock | `/pantry/add`, cooking mode |
 | 5 | Re-planning on schedule changes — less time, guests, eating out, mood, skipped meals | `/plan/adapt` |
-| 6 | Guided cooking mode — verify ingredients, step timers, live sensor feedback | `/cook/[sessionId]` |
-| 7 | Nutrient retention — USDA factors plus first-order thermal kinetics, with warnings | `/cook/[sessionId]/retention` |
+| 6 | Guided cooking mode — verify ingredients, step timers, live sensor feedback | `/cook/session?id=` |
+| 7 | Nutrient retention — USDA factors plus first-order thermal kinetics, with warnings | `/cook/session/retention?id=` |
 | 8 | "Use expiring items" — recipes ranked by what is about to spoil | `/expiring` |
-| 9 | Post-meal feedback — rating, taste, spice, texture, portion | `/cook/[sessionId]/feedback` |
+| 9 | Post-meal feedback — rating, taste, spice, texture, portion | `/cook/session/feedback?id=` |
 | 10 | Personalisation — a preference model updated from every feedback | `src/lib/engines/learning.ts` |
 | 11 | Grocery list & budget — plan minus pantry, pack-size rounding, cost estimate, milk / meat / herbs bought in fresh trips | `/plan/grocery` |
 | 13 | Cook once, eat twice — a long dish is cooked once and reheated at the next rushed meal; every dish lists what to weigh out | `/plan`, `/cook` |
@@ -57,11 +57,11 @@ a dead end when the network or a key is missing.
 | Plans changed / adapt | `/plan/adapt` |
 | Cook tab | `/cook` |
 | Complete meals | `/meals` |
-| My foods / add / edit | `/foods`, `/foods/new`, `/foods/[id]` |
-| Recipe detail | `/recipes/[id]` |
-| Cooking mode | `/cook/[sessionId]` |
-| Nutrient retention | `/cook/[sessionId]/retention` |
-| Feedback | `/cook/[sessionId]/feedback` |
+| My foods / add / edit | `/foods`, `/foods/new`, `/foods/edit?id=` |
+| Recipe detail | `/recipes/view?id=` |
+| Cooking mode | `/cook/session?id=` |
+| Nutrient retention | `/cook/session/retention?id=` |
+| Feedback | `/cook/session/feedback?id=` |
 | Pantry / add item | `/pantry`, `/pantry/add` |
 | Use expiring items | `/expiring` |
 | Profile | `/profile`, `/profile/edit` |
@@ -205,6 +205,14 @@ ML_SERVICE_URL=http://localhost:8000
 whenever it is unset or unreachable. Full details in [`ml/README.md`](ml/README.md).
 
 ---
+
+## Deploy to GitHub Pages
+
+The app is published as a static, installable site. Push to `main` and the *Deploy to GitHub
+Pages* workflow builds and publishes it; set **Settings → Pages → Source** to **GitHub Actions**
+once. Live site: https://santhoshprabhut2.github.io/cookwise-agent/. Build and try it locally with
+`npm run build:pages` and `npm run preview:pages`. Details, and what differs from the server build,
+are in [docs/PAGES.md](docs/PAGES.md).
 
 ## PWA install
 

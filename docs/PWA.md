@@ -18,6 +18,13 @@ page records how it works and what has been checked.
 `next.config.ts` serves `/sw.js` and the manifest with `max-age=0, must-revalidate` and adds
 `Service-Worker-Allowed: /`, so a deploy reaches users on their next visit.
 
+**On GitHub Pages** the same files run under the repository's address (`/cookwise-agent/`), where
+headers cannot be set. The worker works out its own base path from its scope, is registered with
+`?slash=1` so it knows pages are served as folders (`/home/`), and is given the list of every built
+file so the whole app is cached on the first visit. It does not use navigation preload, because
+when the network is down a failed preload can hide the cached page. Manifest and icon URLs go
+through `src/lib/base-path.ts`. See [PAGES.md](PAGES.md).
+
 ## What was checked (production build, `npm run build` then `npm start`)
 
 - The worker registers, activates and **controls the page**; its scope is `/`.

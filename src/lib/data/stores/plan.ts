@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { STATIC_EXPORT } from "@/lib/base-path";
 import { sanitizeLeftovers } from "@/lib/engines/leftovers";
 import {
   adaptPlan,
@@ -171,6 +172,7 @@ async function requestAiPlan(
   req: MealPlanRequest,
   recipes: Recipe[],
 ): Promise<PlannedMeal[] | null> {
+  if (STATIC_EXPORT) return null;
   if (typeof window === "undefined" || typeof fetch !== "function") return null;
   if (typeof navigator !== "undefined" && navigator.onLine === false) return null;
   try {

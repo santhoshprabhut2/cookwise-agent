@@ -13,6 +13,7 @@
  * SDK is pulled into the client bundle.
  */
 
+import { STATIC_EXPORT } from "@/lib/base-path";
 import type {
   IdentifyIngredientResult,
   MealPlanRequest,
@@ -60,7 +61,15 @@ export async function blobToBase64(blob: Blob): Promise<string> {
   return btoa(binary);
 }
 
+/**
+ * A static export (GitHub Pages) has no server, so there is no `/api` to call.
+ * Every helper then returns the fallback straight away and the app uses its
+ * local engines, exactly as it does offline or without an API key.
+ */
+const NO_SERVER = "No server on this host. Using the built-in engine.";
+
 async function postJson<T>(path: string, body: unknown): Promise<AiResult<T>> {
+  if (STATIC_EXPORT) return fallback(NO_SERVER);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
@@ -98,6 +107,7 @@ let statusCache: Promise<AiStatus> | null = null;
 
 /** `{ gemini, ml }`; cached for the lifetime of the page. */
 export async function aiStatus(): Promise<AiStatus> {
+  if (STATIC_EXPORT) return { gemini: false, ml: false };
   if (!statusCache) {
     statusCache = fetch("/api/ai/status", { cache: "no-store" })
       .then((r) => (r.ok ? (r.json() as Promise<AiStatus>) : { gemini: false, ml: false }))

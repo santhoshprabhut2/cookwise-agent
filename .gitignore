@@ -42,3 +42,6 @@ next-env.d.ts
 
 # per-agent Next.js build dirs
 /.next-*/
+
+# GitHub Pages build: the working copy and its output
+/.pages/

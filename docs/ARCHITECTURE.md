@@ -43,8 +43,8 @@ src/
     (tabs)/                    route group with BottomNav in its layout
       home/  plan/  cook/  pantry/  profile/
       meals/  foods/           complete meals list; custom foods (list, new, [id])
-    recipes/[id]/              recipe detail
-    cook/[sessionId]/          cooking mode (verify → steps → retention → feedback)
+    recipes/view/              recipe detail (?id=)
+    cook/session/              cooking mode (?id=): verify → steps → retention/ → feedback/
     expiring/                  "Use expiring items"
     plan/grocery/  plan/adapt/ grocery list, schedule-change / re-plan
     api/ai/*/route.ts          Gemini-backed route handlers
@@ -223,11 +223,11 @@ Use `responseMimeType: "application/json"` + `responseSchema` for structured out
 | Adapt | `/plan/adapt` | 5 |
 | Cook tab | `/cook` | 6 entry; today's meals; recommended; expiring |
 | Complete meals | `/meals` | 2, 6 (whole plates for lunch and dinner, filterable) |
-| My foods | `/foods`, `/foods/new`, `/foods/[id]` | 2, 6 (add a dish with ingredient weights; edit, delete) |
-| Recipe detail | `/recipes/[id]` | 6 |
-| Cooking mode | `/cook/[sessionId]` | 4, 6, 7 (verify ingredients → steps with live weight/temp → retention → feedback) |
-| Nutrient retention | `/cook/[sessionId]/retention` | 7 |
-| Feedback | `/cook/[sessionId]/feedback` | 9, 10 |
+| My foods | `/foods`, `/foods/new`, `/foods/edit?id=` | 2, 6 (add a dish with ingredient weights; edit, delete) |
+| Recipe detail | `/recipes/view?id=` | 6 |
+| Cooking mode | `/cook/session?id=` | 4, 6, 7 (verify ingredients → steps with live weight/temp → retention → feedback) |
+| Nutrient retention | `/cook/session/retention?id=` | 7 |
+| Feedback | `/cook/session/feedback?id=` | 9, 10 |
 | Pantry | `/pantry`, `/pantry/add` | 3, 4 (scan / dock / receipt / manual) |
 | Use expiring | `/expiring` | 8 |
 | Profile | `/profile`, `/profile/edit` | 1, 10 |
