@@ -17,7 +17,7 @@ describe("isTabActive", () => {
 
   it("keeps the Cook tab lit on the complete meals and My foods screens", () => {
     const cook = NAV_TABS.find((t) => t.href === "/cook")!;
-    for (const path of ["/meals", "/foods", "/foods/new", "/foods/custom-1"]) {
+    for (const path of ["/meals", "/foods", "/foods/new", "/foods/edit"]) {
       expect(isTabActive(path, cook.href, cook.alsoActiveFor), path).toBe(true);
     }
   });

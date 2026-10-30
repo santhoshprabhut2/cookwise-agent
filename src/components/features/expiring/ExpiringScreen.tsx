@@ -1,5 +1,6 @@
 "use client";
 
+import { routes } from "@/lib/routes";
 import { ChevronRight, Info } from "lucide-react";
 import { useMemo, useState } from "react";
 import { AppHeader, Page } from "@/components/layout";
@@ -115,7 +116,7 @@ export function ExpiringScreen() {
                     {visible.map(({ recipe, expiringUsed }, index) => (
                       <li key={recipe.id}>
                         <ListRow
-                          href={`/recipes/${recipe.id}`}
+                          href={routes.recipe(recipe.id)}
                           divider={index < visible.length - 1}
                           aria-label={`${recipe.name}, uses ${expiringUsed.length} expiring items`}
                           leading={

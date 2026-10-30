@@ -1,5 +1,6 @@
 "use client";
 
+import { routes } from "@/lib/routes";
 import {
   ArrowRight,
   ChefHat,
@@ -9,7 +10,7 @@ import {
   ShoppingBasket,
   Utensils,
 } from "lucide-react";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { Page, StickyFooter } from "@/components/layout";
 import {
@@ -67,13 +68,12 @@ function MetaRow({ label, children }: { label: string; children: React.ReactNode
 }
 
 export function RecipeDetailScreen() {
-  const params = useParams<{ id: string }>();
   const searchParams = useSearchParams();
   const router = useRouter();
   const { toast } = useToast();
   const hydrated = useHydrated();
 
-  const recipeId = params?.id ?? "";
+  const recipeId = searchParams.get("id") ?? "";
   const plannedMealId = searchParams.get("meal") ?? undefined;
 
   const recipe = useRecipeStore((s) => s.recipes.find((r) => r.id === recipeId));
@@ -182,7 +182,7 @@ export function RecipeDetailScreen() {
     const session = useCookStore
       .getState()
       .start(recipe.id, servings, plannedMeal?.id ?? plannedMealId);
-    router.push(`/cook/${session.id}`);
+    router.push(routes.cook(session.id));
   };
 
   return (
@@ -296,7 +296,7 @@ export function RecipeDetailScreen() {
               size="lg"
               className="flex-1"
               rightIcon={<ArrowRight size={18} />}
-              onClick={() => router.push(`/cook/${openSession.id}`)}
+              onClick={() => router.push(routes.cook(openSession.id))}
             >
               Resume
             </Button>

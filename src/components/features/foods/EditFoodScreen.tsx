@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useMemo } from "react";
 import { AppHeader, Page } from "@/components/layout";
 import { EmptyState, Skeleton } from "@/components/ui";
@@ -11,9 +11,9 @@ import { CustomFoodForm } from "./CustomFoodForm";
 
 /** Loads one of the user's foods into the form. Built-in recipes cannot be edited. */
 export function EditFoodScreen() {
-  const params = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
   const hydrated = useHydrated();
-  const id = params?.id ?? "";
+  const id = searchParams.get("id") ?? "";
   const recipe = useRecipeStore((s) => s.recipes.find((r) => r.id === id));
 
   const initial = useMemo(

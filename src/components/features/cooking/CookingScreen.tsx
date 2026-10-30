@@ -1,5 +1,6 @@
 "use client";
 
+import { routes } from "@/lib/routes";
 import { Bluetooth, ChevronLeft } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -123,7 +124,7 @@ export function CookingScreen({ sessionId }: CookingScreenProps) {
   // A finished session has its own screen.
   useEffect(() => {
     if (!hydrated) return;
-    if (status === "completed") router.replace(`/cook/${sessionId}/retention`);
+    if (status === "completed") router.replace(routes.retention(sessionId));
   }, [hydrated, status, sessionId, router]);
 
   // Sample the pan into the session while the steps are running.
@@ -193,7 +194,7 @@ export function CookingScreen({ sessionId }: CookingScreenProps) {
     if (current) endCurrentStep(current);
     const done = useCookStore.getState().complete();
     toast({ title: "Meal logged", tone: "success" });
-    router.replace(`/cook/${done?.id ?? sessionId}/retention`);
+    router.replace(routes.retention(done?.id ?? sessionId));
   }, [steps, stepIndex, endCurrentStep, router, sessionId, toast]);
 
   const connectDock = useCallback(async () => {

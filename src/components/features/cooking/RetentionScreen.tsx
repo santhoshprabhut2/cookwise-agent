@@ -1,5 +1,6 @@
 "use client";
 
+import { routes } from "@/lib/routes";
 import { ArrowRight, Leaf, TriangleAlert } from "lucide-react";
 import { useEffect, useMemo } from "react";
 import { AppHeader, Page, StickyFooter } from "@/components/layout";
@@ -282,7 +283,7 @@ export function RetentionScreen({ sessionId }: RetentionScreenProps) {
           fullWidth
           size="lg"
           rightIcon={<ArrowRight size={18} />}
-          href={`/cook/${sessionId}/feedback`}
+          href={routes.feedback(sessionId)}
         >
           Rate this meal
         </Button>

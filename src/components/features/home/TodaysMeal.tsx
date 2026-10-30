@@ -1,5 +1,6 @@
 "use client";
 
+import { routes } from "@/lib/routes";
 import { ArrowRight, CalendarDays, Clock, Dumbbell, Flame } from "lucide-react";
 import { useState } from "react";
 import {
@@ -40,7 +41,7 @@ export function TodaysMealCard({ meal, recipe }: TodaysMealCardProps) {
   const chip = tagLabel(recipe.tags[0]);
 
   return (
-    <Card href={`/recipes/${recipe.id}`} aria-label={`Today's meal: ${recipe.name}`}>
+    <Card href={routes.recipe(recipe.id)} aria-label={`Today's meal: ${recipe.name}`}>
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <p className="text-[12px] font-medium text-text-2">

@@ -1,5 +1,6 @@
 "use client";
 
+import { routes } from "@/lib/routes";
 import { Card, Chip, EmojiTile } from "@/components/ui";
 import type { Recipe } from "@/lib/types";
 import { humanize } from "@/lib/utils";
@@ -13,7 +14,7 @@ export function RecommendedGrid({ recipes }: RecommendedGridProps) {
   return (
     <div className="grid grid-cols-2 gap-3">
       {recipes.map((r) => (
-        <Card key={r.id} padding="none" href={`/recipes/${r.id}`} className="overflow-hidden">
+        <Card key={r.id} padding="none" href={routes.recipe(r.id)} className="overflow-hidden">
           <div className="aspect-[5/4] w-full">
             <EmojiTile
               emoji={r.emoji}
